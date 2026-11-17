@@ -1,0 +1,39 @@
+appId: com.gestorhoras.app
+productName: Gestor de Horas
+copyright: Uso interno
+directories:
+  output: release
+  buildResources: build
+files:
+  - dist/**/*
+  - dist-electron/**/*
+  - package.json
+  - "!node_modules/**/*"
+asar: true
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: build/icon.ico
+  artifactName: GestorHoras-Setup-${version}.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowElevation: true
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+  shortcutName: Gestor de Horas
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
+  installerHeaderIcon: build/icon.ico
+  # Los datos (%APPDATA%/Gestor de Horas) NO se borran al desinstalar ni al actualizar.
+  deleteAppDataOnUninstall: false
+  runAfterFinish: true
+  language: "3082"
+# Solo los idiomas necesarios (reduce el tamaño del instalador).
+electronLanguages:
+  - es
+  - en-US
+compression: maximum
+publish: null
