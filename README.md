@@ -17,12 +17,13 @@ Aplicación de escritorio para Windows, **ligera, privada y 100 % local**, para 
 <br />
 ![SQLite](https://img.shields.io/badge/SQLite-local-003B57?style=for-the-badge&logo=sqlite&logoColor=white)
 ![Tailwind CSS](https://img.shields.io/badge/Tailwind-4-06B6D4?style=for-the-badge&logo=tailwindcss&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-59%20unit%20%2B%2018%20E2E-22C55E?style=for-the-badge&logo=vitest&logoColor=white)
+![Tests](https://img.shields.io/badge/tests-73%20unit%20%2B%2019%20E2E-22C55E?style=for-the-badge&logo=vitest&logoColor=white)
 ![Offline](https://img.shields.io/badge/Internet-no%20necesario-64748B?style=for-the-badge)
 
 <br />
 
-[🆕 Novedades](#-novedades-v11) ·
+[🌐 Tareas comunes](#-novedad-v12-tareas-comunes-a-todos-los-proyectos) ·
+[🆕 Novedades v1.1](#-novedades-v11) ·
 [✨ Características](#-características) ·
 [📸 Capturas](#-capturas) ·
 [⬇️ Instalación](#️-instalación) ·
@@ -35,6 +36,38 @@ Aplicación de escritorio para Windows, **ligera, privada y 100 % local**, para 
 ---
 
 <img src="docs/screenshots/imputar.png" alt="Pantalla de imputación de horas" width="100%" />
+
+## 🌐 Novedad v1.2: tareas comunes a todos los proyectos
+
+¿Una reunión de equipo, una actualización de una librería compartida o una formación que afecta a **todos** los proyectos? Impútala **una sola vez** al proyecto especial **🌐 Todos los proyectos** y decide después, en las estadísticas, cómo verla.
+
+<table>
+<tr>
+<td width="50%"><img src="docs/screenshots/reparto-sin.png" alt="Sin repartir" /><p align="center"><b>Sin repartir</b>: las tareas comunes en su propia línea</p></td>
+<td width="50%"><img src="docs/screenshots/reparto-proporcional.png" alt="Reparto proporcional" /><p align="center"><b>Proporcional</b>: horas directas + parte común de cada proyecto</p></td>
+</tr>
+</table>
+
+| Vista | Cómo se reparte |
+|---|---|
+| **Sin repartir** | Aparecen como una línea propia, 🌐 *Todos los proyectos*. |
+| **Proporcional** | Cada proyecto recibe una parte según las horas que le has dedicado en el periodo. Quien más trabajo tiene, más carga común asume. |
+| **A partes iguales** | Se divide por igual entre los proyectos con horas en el periodo. |
+
+> [!IMPORTANT]
+> **¿Por qué no se reparte al guardar?** Repartir 1 h entre 3 proyectos daría 0,33 h a cada uno. Eso rompe los tramos de 15 minutos y descuadra las imputaciones (el famoso «proyecto con 2,64 h»). Además, el reparto quedaría congelado aunque cambie el trabajo del periodo.
+>
+> Por eso la tarea común se **guarda tal cual**, con horas exactas y en tramos de 15 minutos, y **el reparto es solo una vista** que se calcula al consultar. Los decimales aparecen únicamente en las estadísticas y **el total siempre cuadra**.
+
+**Cómo se usa:**
+1. En **Proyectos**, pulsa **Configurar** en *Tareas comunes (todos)*. Se crea el proyecto «Todos los proyectos» con el código `COMUN`.
+2. Al imputar, elige **🌐 Todos los proyectos (tarea común)** en el selector de proyecto, con su tipo de trabajo y sus horas como cualquier otra tarea. Cuenta para tu jornada.
+3. En **Histórico → Estadísticas**, elige *Sin repartir*, *Proporcional* o *A partes iguales*. La elección se recuerda.
+
+Detalles:
+- Si en el periodo ningún proyecto tiene horas directas, se reparte entre los proyectos activos.
+- Si filtras por un proyecto, verás la parte común que le corresponde dentro del conjunto.
+- Las vacaciones y las bajas no participan en el reparto.
 
 ## 🆕 Novedades v1.1
 
@@ -302,6 +335,7 @@ Apariencia (tema y color) · usuario · días laborables · jornada máxima diar
 | 8 | Solo hay **un** proyecto de Vacaciones y **uno** de Baja. Sus imputaciones son siempre de tipo «Ausencia». |
 | 9 | Las ausencias por periodo solo se registran en **días laborables** y nunca superan la jornada. |
 | 10 | No se puede cambiar el tipo de un proyecto que ya tiene imputaciones. |
+| 11 | Solo hay **un** proyecto de tareas comunes. Sus horas se guardan una vez y **nunca** se reparten en la base de datos, solo en la vista de estadísticas. |
 
 > [!NOTE]
 > Las horas se guardan internamente como **minutos enteros**, así que nunca hay errores de redondeo decimal (0,1 + 0,2 ≠ 0,3).
@@ -311,7 +345,7 @@ Apariencia (tema y color) · usuario · días laborables · jornada máxima diar
 ```bash
 npm install     # 📦 instala dependencias (requiere Node.js 20+)
 npm run dev     # 🔥 modo desarrollo (F12 abre DevTools)
-npm test        # 🧪 59 pruebas unitarias y de integración (Vitest)
+npm test        # 🧪 73 pruebas unitarias y de integración (Vitest)
 npm run build   # 🏗️ compila la interfaz y el proceso principal
 npm run dist    # 📦 genera release/GestorHoras-Setup-x.y.z.exe
 ```
@@ -320,7 +354,7 @@ npm run dist    # 📦 genera release/GestorHoras-Setup-x.y.z.exe
 <summary><b>🧪 Pruebas end-to-end</b></summary>
 <br />
 
-`tests/e2e/run.mjs` arranca la **aplicación Electron real** y recorre 18 escenarios: primer uso, proyectos, imputación, límites, edición, histórico, configuración, reloj flotante, **recordatorio real por temporizador con la ventana oculta**, arrastre, restauración, bandeja, persistencia tras reiniciar, proyectos especiales, vacaciones por periodo, duplicar y repetir tareas, estadísticas y modo noche.
+`tests/e2e/run.mjs` arranca la **aplicación Electron real** y recorre 19 escenarios: primer uso, proyectos, imputación, límites, edición, histórico, configuración, reloj flotante, **recordatorio real por temporizador con la ventana oculta**, arrastre, restauración, bandeja, persistencia tras reiniciar, proyectos especiales, vacaciones por periodo, duplicar y repetir tareas, estadísticas, **tareas comunes con reparto** (comprobando que el total cuadra) y modo noche.
 
 ```bash
 npm run build

@@ -88,6 +88,24 @@ export const MIGRATIONS: string[] = [
   CREATE INDEX idx_entries_date      ON time_entries(date);
   CREATE INDEX idx_entries_project   ON time_entries(project_id);
   `,
+  // v3: tipo de proyecto «shared» (tareas comunes a todos los proyectos).
+  //     Se reconstruye projects para ampliar el CHECK de kind, conservando ids y datos.
+  `
+  CREATE TABLE projects_v3 (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    code        TEXT    NOT NULL COLLATE NOCASE UNIQUE CHECK (length(trim(code)) > 0),
+    name        TEXT    NOT NULL CHECK (length(trim(name)) > 0),
+    active      INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+    created_at  TEXT    NOT NULL,
+    updated_at  TEXT    NOT NULL,
+    kind        TEXT    NOT NULL DEFAULT 'normal' CHECK (kind IN ('normal', 'shared', 'vacation', 'sick_leave'))
+  );
+  INSERT INTO projects_v3 (id, code, name, active, created_at, updated_at, kind)
+    SELECT id, code, name, active, created_at, updated_at, kind FROM projects;
+  DROP TABLE projects;
+  ALTER TABLE projects_v3 RENAME TO projects;
+  CREATE UNIQUE INDEX idx_projects_special_kind ON projects(kind) WHERE kind <> 'normal';
+  `,
 ];
 
 export const REQUIRED_TABLES = ['users', 'projects', 'time_entries', 'settings'];
@@ -238,16 +256,29 @@ function migrate(db: Database) {
       `La base de datos pertenece a una versión más reciente de la aplicación (esquema v${current}). Actualiza la aplicación.`,
     );
   }
-  for (let v = current; v < MIGRATIONS.length; v++) {
-    db.exec('BEGIN');
-    try {
-      db.exec(MIGRATIONS[v]);
-      db.exec(`PRAGMA user_version = ${v + 1}`);
-      db.exec('COMMIT');
-    } catch (e) {
-      db.exec('ROLLBACK');
-      throw e;
+  if (current === MIGRATIONS.length) return;
+  // Procedimiento recomendado por SQLite para reconstruir tablas: claves foráneas desactivadas
+  // durante la migración y comprobación de integridad referencial antes de confirmar.
+  db.exec('PRAGMA foreign_keys = OFF');
+  try {
+    for (let v = current; v < MIGRATIONS.length; v++) {
+      db.exec('BEGIN');
+      try {
+        db.exec(MIGRATIONS[v]);
+        if ((db.exec('PRAGMA foreign_key_check')[0]?.values ?? []).length) {
+          throw new Error(
+            'La base de datos contiene imputaciones que apuntan a usuarios o proyectos inexistentes; no se puede actualizar.',
+          );
+        }
+        db.exec(`PRAGMA user_version = ${v + 1}`);
+        db.exec('COMMIT');
+      } catch (e) {
+        db.exec('ROLLBACK');
+        throw e;
+      }
     }
+  } finally {
+    db.exec('PRAGMA foreign_keys = ON');
   }
 }
 
@@ -271,7 +302,10 @@ export function validateBackupBytes(SQL: SqlJsStatic, bytes: Uint8Array): Databa
     db.exec('PRAGMA foreign_keys = ON;');
     try {
       migrate(db);
-    } catch {
+    } catch (e) {
+      if (e instanceof Error && e.message.includes('apuntan a usuarios o proyectos inexistentes')) {
+        throw new Error('La copia de seguridad contiene referencias rotas entre tablas.');
+      }
       throw new Error('La copia de seguridad tiene un formato que esta versión no reconoce.');
     }
     // Comprobación de columnas: evita aceptar una base con los mismos nombres de tabla pero otro esquema.

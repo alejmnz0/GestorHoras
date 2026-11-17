@@ -24,8 +24,29 @@ export const WORK_TYPES: { value: WorkType; label: string }[] = [
 
 export const PROJECT_KINDS: { value: ProjectKind; label: string; emoji: string }[] = [
   { value: 'normal', label: 'Normal', emoji: '' },
+  { value: 'shared', label: 'Común (todos)', emoji: '🌐' },
   { value: 'vacation', label: 'Vacaciones', emoji: '🌴' },
   { value: 'sick_leave', label: 'Baja laboral', emoji: '🩺' },
+];
+
+/** Vacaciones o baja: no es trabajo y se registra como «ausencia». */
+export function isAbsenceKind(k: ProjectKind): k is 'vacation' | 'sick_leave' {
+  return k === 'vacation' || k === 'sick_leave';
+}
+
+/** Horas de trabajo: proyectos normales y tareas comunes. */
+export function isWorkKind(k: ProjectKind): boolean {
+  return k === 'normal' || k === 'shared';
+}
+
+export const SHARED_DISTRIBUTIONS: { value: 'none' | 'proportional' | 'equal'; label: string; hint: string }[] = [
+  { value: 'none', label: 'Sin repartir', hint: 'Las tareas comunes aparecen en su propia línea.' },
+  {
+    value: 'proportional',
+    label: 'Proporcional',
+    hint: 'Cada proyecto recibe una parte según las horas que le has dedicado en el periodo.',
+  },
+  { value: 'equal', label: 'A partes iguales', hint: 'Se divide por igual entre los proyectos con horas en el periodo.' },
 ];
 
 export function projectKindLabel(k: ProjectKind): string {

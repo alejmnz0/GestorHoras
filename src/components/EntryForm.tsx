@@ -9,6 +9,7 @@ import {
   WORK_TYPES,
   PROJECT_KINDS,
   addDays,
+  isAbsenceKind,
   checkDailyLimit,
   formatHours,
   isValidIsoDate,
@@ -79,7 +80,7 @@ export function EntryForm({
     if (!isValidIsoDate(values.date)) p.date = 'Fecha no válida.';
     if (!values.projectId) p.projectId = 'Selecciona un proyecto.';
     const proj = projects.find((x) => x.id === values.projectId);
-    if ((!values.workType || values.workType === 'ausencia') && (!proj || proj.kind === 'normal')) {
+    if ((!values.workType || values.workType === 'ausencia') && (!proj || !isAbsenceKind(proj.kind))) {
       p.workType = 'Selecciona el tipo de trabajo.';
     }
     try {
@@ -98,10 +99,12 @@ export function EntryForm({
 
   const dayFull = available < SLOT_MINUTES;
   const selectedProject = projects.find((p) => p.id === values.projectId);
-  const isAbsence = !!selectedProject && selectedProject.kind !== 'normal';
+  const isAbsence = !!selectedProject && isAbsenceKind(selectedProject.kind);
+  const isShared = selectedProject?.kind === 'shared';
   const absenceInfo = PROJECT_KINDS.find((k) => k.value === selectedProject?.kind);
   const workProjects = projects.filter((p) => p.kind === 'normal');
-  const absenceProjects = projects.filter((p) => p.kind !== 'normal');
+  const sharedProjects = projects.filter((p) => p.kind === 'shared');
+  const absenceProjects = projects.filter((p) => isAbsenceKind(p.kind));
 
   async function submit(e?: React.FormEvent) {
     e?.preventDefault();
@@ -193,11 +196,11 @@ export function EntryForm({
               <button
                 type="button"
                 title="Ir a hoy"
-                className="ml-0.5 flex h-9 shrink-0 items-center gap-1 rounded-lg px-2 text-xs font-medium text-brand-700 hover:bg-brand-50"
+                aria-label="Ir a hoy"
+                className="flex size-9 shrink-0 items-center justify-center rounded-lg text-brand-700 hover:bg-brand-50"
                 onClick={() => set({ date: todayIso() })}
               >
-                <CalendarDays className="size-3.5" />
-                Hoy
+                <CalendarDays className="size-4" />
               </button>
             )}
           </div>
@@ -223,6 +226,11 @@ export function EntryForm({
           <option value="" disabled>
             {projects.length ? 'Selecciona un proyecto…' : 'No hay proyectos activos (créalos en «Proyectos»)'}
           </option>
+          {sharedProjects.map((p) => (
+            <option key={p.id} value={p.id}>
+              🌐 {p.name} (tarea común){!p.active ? ' (inactivo)' : ''}
+            </option>
+          ))}
           {workProjects.map((p) => (
             <option key={p.id} value={p.id}>
               {p.name}
@@ -241,6 +249,16 @@ export function EntryForm({
           )}
         </select>
       </Field>
+
+      {isShared && (
+        <div className="-mt-2 flex items-start gap-2.5 rounded-xl border border-blue-200 bg-blue-50 px-3.5 py-3 text-[13px] text-blue-700">
+          <span className="text-lg leading-none">🌐</span>
+          <span>
+            <b>Tarea común a todos los proyectos.</b> Se guarda una sola vez con las horas exactas; en{' '}
+            <b>Histórico → Estadísticas</b> podrás verla sin repartir o repartida entre los proyectos.
+          </span>
+        </div>
+      )}
 
       {isAbsence ? (
         <div className="flex items-center gap-2.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-3 text-[13px] text-emerald-700">

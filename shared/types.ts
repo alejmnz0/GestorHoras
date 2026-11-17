@@ -5,9 +5,17 @@
 
 export type WorkType = 'incidencia' | 'desarrollo' | 'mantenimiento' | 'ausencia';
 
-/** normal: proyecto de trabajo. vacation / sick_leave: proyectos especiales de ausencia (uno de cada). */
-export type ProjectKind = 'normal' | 'vacation' | 'sick_leave';
-export type AbsenceKind = Exclude<ProjectKind, 'normal'>;
+/**
+ * normal: proyecto de trabajo.
+ * shared: proyecto especial «Todos los proyectos» para tareas comunes (se reparten solo al analizar).
+ * vacation / sick_leave: proyectos especiales de ausencia.
+ * Solo puede haber uno de cada tipo especial.
+ */
+export type ProjectKind = 'normal' | 'shared' | 'vacation' | 'sick_leave';
+export type AbsenceKind = 'vacation' | 'sick_leave';
+
+/** Cómo mostrar en estadísticas las horas de tareas comunes. */
+export type SharedDistribution = 'none' | 'proportional' | 'equal';
 
 export type Theme = 'system' | 'light' | 'dark';
 export type Accent = 'blue' | 'violet' | 'green' | 'orange' | 'rose';
@@ -155,7 +163,12 @@ export interface ProjectStat {
   name: string;
   kind: ProjectKind;
   active: boolean;
+  /** Minutos totales mostrados (directos + parte repartida; puede tener decimales al repartir). */
   minutes: number;
+  /** Minutos imputados directamente al proyecto. */
+  directMinutes: number;
+  /** Parte de las tareas comunes asignada al repartir (0 si no se reparte). */
+  sharedMinutes: number;
   /** % sobre las horas de trabajo (sin ausencias); para ausencias, sobre el total. */
   percent: number;
   entries: number;
@@ -184,6 +197,13 @@ export interface StatsResult {
   coveragePartial: boolean;
   /** true si la evolución diaria muestra solo los últimos 92 días del periodo. */
   byDayTruncated: boolean;
+  /** Minutos de tareas comunes en el periodo y cómo se están mostrando. */
+  sharedMinutes: number;
+  distribution: SharedDistribution;
+  /** Proyectos entre los que se reparte (vacío si no se reparte). */
+  distributionTargets: number;
+  /** true si hay filtro de proyecto o búsqueda: al repartir, los % son la cuota sobre todo el periodo. */
+  narrowed: boolean;
   incompleteDays: { date: string; imputedMinutes: number; pendingMinutes: number }[];
   byProject: ProjectStat[];
   byWorkType: { workType: WorkType; minutes: number; percent: number }[];

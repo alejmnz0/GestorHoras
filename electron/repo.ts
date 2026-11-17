@@ -10,7 +10,9 @@ import {
   addDays,
   checkDailyLimit,
   dateRange,
+  isAbsenceKind,
   isValidIsoDate,
+  isWorkKind,
   isWorkday,
   projectKindLabel,
   todayIso,
@@ -27,6 +29,8 @@ import type {
   AbsenceInput,
   AbsenceResult,
   ProjectKind,
+  ProjectStat,
+  SharedDistribution,
   StatsResult,
   WorkType,
   DayData,
@@ -273,7 +277,7 @@ export class Repo {
     if (!project) throw new ValidationError('El proyecto seleccionado no existe.');
     // Vacaciones y baja siempre se registran como "ausencia"; los proyectos normales no admiten ese tipo.
     let workType: WorkType;
-    if (project.kind !== 'normal') {
+    if (isAbsenceKind(project.kind)) {
       workType = 'ausencia';
     } else {
       if (!isWorkType(input.workType) || input.workType === 'ausencia') {
@@ -346,7 +350,7 @@ export class Repo {
   lastEntry(userId: number): TimeEntry | null {
     // Se ignoran las ausencias: lo útil es repetir la última tarea de trabajo.
     return (
-      this.queryEntries("WHERE e.user_id = ? AND p.kind = 'normal'", [userId], 'e.created_at DESC, e.id DESC LIMIT 1')[0] ??
+      this.queryEntries("WHERE e.user_id = ? AND p.kind IN ('normal', 'shared')", [userId], 'e.created_at DESC, e.id DESC LIMIT 1')[0] ??
       null
     );
   }
@@ -413,10 +417,14 @@ export class Repo {
    * Estadísticas sobre el mismo filtro del histórico.
    * La jornada esperada y los días pendientes se calculan para un único usuario.
    */
-  stats(filter: HistoryFilter = {}, today: string = todayIso()): StatsResult {
+  stats(
+    filter: HistoryFilter = {},
+    today: string = todayIso(),
+    distribution: SharedDistribution = 'none',
+  ): StatsResult {
     const { rows } = this.history({ ...filter, sortBy: 'date', sortDir: 'asc' });
     const settings = this.getSettings();
-    const isAbs = (k: ProjectKind) => k !== 'normal';
+    const isAbs = isAbsenceKind;
     const totalMinutes = rows.reduce((s, r) => s + r.minutes, 0);
     const vacationMinutes = rows.filter((r) => r.projectKind === 'vacation').reduce((s, r) => s + r.minutes, 0);
     const sickMinutes = rows.filter((r) => r.projectKind === 'sick_leave').reduce((s, r) => s + r.minutes, 0);
@@ -437,16 +445,35 @@ export class Repo {
         kind: r.projectKind,
         active: r.projectActive,
         minutes: 0,
+        directMinutes: 0,
+        sharedMinutes: 0,
         percent: 0,
         entries: 0,
       };
       p.minutes += r.minutes;
+      p.directMinutes += r.minutes;
       p.entries++;
       projMap.set(r.projectId, p);
     }
-    const byProject = [...projMap.values()]
+    // Las horas comunes del periodo se calculan sin los filtros de proyecto/búsqueda, para que el
+    // selector de reparto siga disponible (y coherente) al filtrar por un proyecto concreto.
+    const narrowed = !!(filter.projectId || (filter.search ?? '').trim());
+    const sharedBase = narrowed ? this.history({ ...filter, projectId: null, search: '' }).rows : rows;
+    const sharedMinutes = sharedBase.filter((r) => r.projectKind === 'shared').reduce((s, r) => s + r.minutes, 0);
+    // Si se filtra por el propio proyecto común, no tiene sentido repartirlo.
+    const filteringShared = !!filter.projectId && this.getProject(filter.projectId)?.kind === 'shared';
+    const order = (k: ProjectKind) => (k === 'normal' ? 0 : k === 'shared' ? 1 : 2);
+    let byProject: ProjectStat[] = [...projMap.values()]
       .map((p) => ({ ...p, percent: percentOf(p.minutes, isAbs(p.kind) ? totalMinutes : workMinutes) }))
-      .sort((a, b) => Number(isAbs(a.kind)) - Number(isAbs(b.kind)) || b.minutes - a.minutes);
+      .sort((a, b) => order(a.kind) - order(b.kind) || b.minutes - a.minutes);
+    let distributionTargets = 0;
+    if (distribution !== 'none' && !filteringShared) {
+      const d = this.distributeShared(filter, rows, distribution);
+      if (d) {
+        byProject = d.byProject;
+        distributionTargets = d.targets;
+      }
+    }
 
     // Por tipo de trabajo (sobre el total)
     const typeMap = new Map<WorkType, number>();
@@ -462,7 +489,7 @@ export class Repo {
     const sickDays = new Set<string>();
     for (const r of rows) {
       dayMap.set(r.date, (dayMap.get(r.date) ?? 0) + r.minutes);
-      if (r.projectKind === 'normal') workDayMap.set(r.date, (workDayMap.get(r.date) ?? 0) + r.minutes);
+      if (isWorkKind(r.projectKind)) workDayMap.set(r.date, (workDayMap.get(r.date) ?? 0) + r.minutes);
       if (r.projectKind === 'vacation') vacDays.add(r.date);
       if (r.projectKind === 'sick_leave') sickDays.add(r.date);
     }
@@ -531,11 +558,97 @@ export class Repo {
       elapsedWorkingDays,
       coveragePartial,
       byDayTruncated,
+      sharedMinutes,
+      distribution: distributionTargets > 0 ? distribution : 'none',
+      distributionTargets,
+      narrowed,
       incompleteDays: incompleteDays.reverse().slice(0, 60),
       byProject,
       byWorkType,
       byDay,
     };
+  }
+
+  /**
+   * Reparte (solo para mostrar, nunca se guarda) las horas de tareas comunes entre proyectos.
+   * - proportional: según las horas directas de cada proyecto en el periodo.
+   * - equal: a partes iguales entre los proyectos con horas en el periodo.
+   * Si en el periodo no hay horas directas en ningún proyecto, se reparte entre los proyectos activos.
+   * Los pesos se calculan sin los filtros de proyecto/búsqueda, para que un proyecto filtrado
+   * reciba la misma parte que vería sin filtrar.
+   */
+  private distributeShared(
+    filter: HistoryFilter,
+    rows: TimeEntry[],
+    distribution: Exclude<SharedDistribution, 'none'>,
+  ): { byProject: ProjectStat[]; targets: number } | null {
+    const narrowed = !!(filter.projectId || (filter.search ?? '').trim());
+    const base = narrowed ? this.history({ ...filter, projectId: null, search: '' }).rows : rows;
+    const shared = base.filter((r) => r.projectKind === 'shared').reduce((s, r) => s + r.minutes, 0);
+    if (shared === 0) return null;
+
+    const stats = new Map<number, ProjectStat>();
+    for (const r of base) {
+      if (r.projectKind === 'shared') continue;
+      const p = stats.get(r.projectId) ?? {
+        projectId: r.projectId,
+        code: r.projectCode,
+        name: r.projectName,
+        kind: r.projectKind,
+        active: r.projectActive,
+        minutes: 0,
+        directMinutes: 0,
+        sharedMinutes: 0,
+        percent: 0,
+        entries: 0,
+      };
+      p.directMinutes += r.minutes;
+      p.minutes += r.minutes;
+      p.entries++;
+      stats.set(r.projectId, p);
+    }
+    let targets = [...stats.values()].filter((p) => p.kind === 'normal' && p.directMinutes > 0);
+    if (targets.length === 0) {
+      for (const p of this.listProjects().filter((x) => x.kind === 'normal')) {
+        const st: ProjectStat = {
+          projectId: p.id,
+          code: p.code,
+          name: p.name,
+          kind: 'normal',
+          active: p.active,
+          minutes: 0,
+          directMinutes: 0,
+          sharedMinutes: 0,
+          percent: 0,
+          entries: 0,
+        };
+        stats.set(p.id, st);
+      }
+      targets = [...stats.values()].filter((p) => p.kind === 'normal');
+    }
+    if (targets.length === 0) return null;
+    const weightTotal = targets.reduce((s, p) => s + p.directMinutes, 0);
+    for (const p of targets) {
+      const share =
+        distribution === 'proportional' && weightTotal > 0
+          ? (shared * p.directMinutes) / weightTotal
+          : shared / targets.length;
+      p.sharedMinutes = share;
+      p.minutes = p.directMinutes + share;
+    }
+
+    const work = [...stats.values()].filter((p) => p.kind === 'normal').reduce((s, p) => s + p.minutes, 0);
+    const total = [...stats.values()].reduce((s, p) => s + p.minutes, 0);
+    let list = [...stats.values()].map((p) => ({ ...p, percent: percentOf(p.minutes, isAbsenceKind(p.kind) ? total : work) }));
+    if (narrowed) {
+      // Solo los proyectos que devuelve el filtro (misma semántica de búsqueda que el histórico).
+      const visible = new Set(rows.map((r) => r.projectId));
+      if (filter.projectId) visible.add(filter.projectId);
+      list = list.filter((p) => visible.has(p.projectId) && p.kind !== 'shared');
+      if (list.length === 0) return null;
+    }
+    list.sort((a, b) => Number(isAbsenceKind(a.kind)) - Number(isAbsenceKind(b.kind)) || b.minutes - a.minutes);
+    return { byProject: list, targets: targets.length };
   }
 
   deleteEntry(id: number): void {
@@ -654,7 +767,9 @@ export class Repo {
 
 function validateKind(k: unknown): ProjectKind {
   if (k === undefined || k === null) return 'normal';
-  if (k !== 'normal' && k !== 'vacation' && k !== 'sick_leave') throw new ValidationError('Tipo de proyecto no válido.');
+  if (k !== 'normal' && k !== 'shared' && k !== 'vacation' && k !== 'sick_leave') {
+    throw new ValidationError('Tipo de proyecto no válido.');
+  }
   return k;
 }
 

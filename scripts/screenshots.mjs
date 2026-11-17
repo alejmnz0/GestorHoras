@@ -58,6 +58,12 @@ await main.evaluate(async () => {
   const vTo = new Date(today);
   vTo.setDate(today.getDate() - 8);
   await api.entries.registerAbsence({ userId: s.currentUserId, kind: 'vacation', dateFrom: iso(vFrom), dateTo: iso(vTo), minutesPerDay: null, description: 'Puente' });
+  // Tareas comunes a todos los proyectos (se imputan una vez y se reparten en estadísticas).
+  const comun = (await api.projects.create({ code: 'COMUN', name: 'Todos los proyectos', kind: 'shared' })).id;
+  const d3 = new Date(today);
+  d3.setDate(today.getDate() - 5);
+  await api.entries.create({ userId: s.currentUserId, projectId: comun, date: iso(d3), minutes: 90, workType: 'mantenimiento', description: 'Reunión semanal de equipo' });
+  await api.entries.create({ userId: s.currentUserId, projectId: comun, date: iso(today), minutes: 60, workType: 'desarrollo', description: 'Actualización de librería compartida' });
   await api.entries.create({ userId: s.currentUserId, projectId: ids[0], date: iso(today), minutes: 210, workType: 'desarrollo', description: 'Validaciones del formulario de registro' });
   await api.entries.create({ userId: s.currentUserId, projectId: ids[1], date: iso(today), minutes: 120, workType: 'incidencia', description: 'Pedido duplicado en el ERP' });
 });
@@ -85,8 +91,23 @@ await shot('historico.png');
 await main.getByRole('tab', { name: 'Estadísticas' }).click();
 await main.getByText('Horas por proyecto').waitFor();
 await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1280, 980));
+await main.getByRole('radio', { name: 'Sin repartir' }).click();
 await main.waitForTimeout(500);
 await shot('estadisticas.png');
+// Reparto de tareas comunes: sin repartir vs proporcional
+await main.getByText('Horas por proyecto').scrollIntoViewIfNeeded();
+await main.evaluate(() => {
+  const m = document.querySelector('main');
+  const h = [...document.querySelectorAll('h3')].find((x) => x.textContent === 'Horas por proyecto');
+  if (m && h) m.scrollTop += h.getBoundingClientRect().top - 90;
+});
+await main.waitForTimeout(300);
+await shot('reparto-sin.png');
+await main.getByRole('radio', { name: 'Proporcional' }).click();
+await main.getByText(/Repartido entre/).waitFor();
+await main.waitForTimeout(400);
+await shot('reparto-proporcional.png');
+await main.getByRole('radio', { name: 'Sin repartir' }).click();
 await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1280, 800));
 await main.getByRole('tab', { name: 'Registros' }).click();
 
@@ -151,4 +172,9 @@ await floating.screenshot({ path: path.join(out, 'reloj-aviso.png') });
 console.log('✔ reloj.png / reloj-aviso.png');
 
 await app.evaluate(({ app }) => app.quit());
-fs.rmSync(userData, { recursive: true, force: true });
+await new Promise((r) => setTimeout(r, 500));
+try {
+  fs.rmSync(userData, { recursive: true, force: true });
+} catch {
+  /* la carpeta temporal se limpiará sola */
+}

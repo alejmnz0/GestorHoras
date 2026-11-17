@@ -29,7 +29,16 @@ import {
   workTypeLabel,
   type PeriodPreset,
 } from '../../shared/rules';
-import type { HistoryFilter, HistoryResult, Project, SortField, StatsResult, TimeEntry, WorkType } from '../../shared/types';
+import type {
+  HistoryFilter,
+  HistoryResult,
+  Project,
+  SharedDistribution,
+  SortField,
+  StatsResult,
+  TimeEntry,
+  WorkType,
+} from '../../shared/types';
 import { StatsView } from '../components/StatsView';
 import { EditEntryModal } from '../components/EditEntryModal';
 import { useToast } from '../components/Toast';
@@ -61,6 +70,23 @@ export function HistoricoPage({
   const { users, dataVersion, settings } = useApp();
   const [tab, setTab] = useState<Tab>('registros');
   const [stats, setStats] = useState<StatsResult | null>(null);
+  // La preferencia de reparto se recuerda entre sesiones (solo en este equipo).
+  const [distribution, setDistributionState] = useState<SharedDistribution>(() => {
+    try {
+      const v = localStorage.getItem('stats.distribution');
+      return v === 'proportional' || v === 'equal' ? v : 'none';
+    } catch {
+      return 'none';
+    }
+  });
+  const setDistribution = (d: SharedDistribution) => {
+    setDistributionState(d);
+    try {
+      localStorage.setItem('stats.distribution', d);
+    } catch {
+      /* sin almacenamiento: solo dura esta sesión */
+    }
+  };
   const toast = useToast();
   const [filter, setFilter] = useState<HistoryFilter>(EMPTY_FILTER);
   const [search, setSearch] = useState('');
@@ -96,13 +122,13 @@ export function HistoricoPage({
     if (tab !== 'estadisticas' || (!filter.dateFrom && !filter.dateTo)) return;
     let alive = true;
     api.entries
-      .stats(filter)
+      .stats(filter, distribution)
       .then((s) => alive && setStats(s))
       .catch((e) => toast.error('Error al calcular estadísticas', errorMessage(e)));
     return () => {
       alive = false;
     };
-  }, [tab, filter, dataVersion, settings.maxDailyMinutes, settings.workDays.join(',')]);
+  }, [tab, filter, distribution, dataVersion, settings.maxDailyMinutes, settings.workDays.join(',')]);
 
   const openTab = (k: Tab) => {
     // Las estadísticas necesitan un periodo: si no hay ninguno se propone «Este mes».
@@ -337,6 +363,8 @@ export function HistoricoPage({
           userName={stats?.userId ? (users.find((u) => u.id === stats.userId)?.name ?? null) : null}
           maxDailyMinutes={settings.maxDailyMinutes}
           onOpenDay={onOpenDay}
+          distribution={distribution}
+          onDistributionChange={setDistribution}
         />
       ) : (
       <Card className="flex min-h-0 flex-1 flex-col overflow-hidden">

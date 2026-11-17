@@ -262,11 +262,14 @@ await step('Persistencia tras cerrar y volver a abrir la aplicación', async () 
 
 await step('Proyecto especial de Vacaciones desde «Proyectos»', async () => {
   await main.getByRole('button', { name: 'Proyectos' }).click();
-  await main.getByText('Proyecto especial de Vacaciones').waitFor();
-  await main.getByRole('button', { name: 'Configurar' }).first().click();
-  assert.equal(await main.getByPlaceholder('p. ej. Portal de clientes').inputValue(), 'Vacaciones');
+  await main.getByText('Tareas comunes (todos)').waitFor();
+  await main.getByRole('button', { name: 'Configurar Vacaciones' }).click();
+  await main.waitForFunction(
+    (v) => document.querySelector('input[placeholder="p. ej. Portal de clientes"]')?.value === v,
+    'Vacaciones',
+  );
   await main.getByRole('button', { name: 'Crear proyecto' }).click();
-  await main.getByText(/Vacaciones \(VACACIONES\)/).waitFor();
+  await main.getByText('Vacaciones · 0 imputación(es)').waitFor();
   await main.screenshot({ path: path.join(shots, '08-proyectos-especiales.png') });
 });
 
@@ -321,6 +324,50 @@ await step('Estadísticas: horas por proyecto, % y cobertura', async () => {
   assert.equal(st.vacationDays, 5);
   await main.waitForTimeout(300);
   await main.screenshot({ path: path.join(shots, '10-estadisticas.png'), fullPage: true });
+});
+
+await step('Tarea común a todos los proyectos: se imputa una vez y se reparte solo en estadísticas', async () => {
+  await main.getByRole('button', { name: 'Proyectos' }).click();
+  await main.getByRole('button', { name: 'Configurar tareas comunes' }).click();
+  await main.waitForFunction(
+    (v) => document.querySelector('input[placeholder="p. ej. Portal de clientes"]')?.value === v,
+    'Todos los proyectos',
+  );
+  await main.getByRole('button', { name: 'Crear proyecto' }).click();
+  await main.getByText('Todos los proyectos · 0 imputación(es)').waitFor();
+
+  await main.getByRole('button', { name: 'Imputar horas', exact: true }).click();
+  await main.getByRole('button', { name: 'Día anterior' }).click();
+  await main.locator('select').nth(1).selectOption({ label: '🌐 Todos los proyectos (tarea común)' });
+  await main.getByText('Tarea común a todos los proyectos.').waitFor();
+  await main.getByRole('button', { name: 'Mantenimiento', exact: true }).click();
+  await main.getByRole('button', { name: '1,00' }).click();
+  await main.getByPlaceholder('Opcional').fill('Reunión de equipo de todos los proyectos');
+  await main.screenshot({ path: path.join(shots, '13-tarea-comun.png') });
+  await main.getByRole('button', { name: 'Guardar imputación' }).click();
+  await main.getByText('Imputación guardada').last().waitFor();
+  const stored = await main.evaluate(() => window.api.entries.history({ search: 'Todos los proyectos' }));
+  assert.equal(stored.rows.length, 1, 'se guarda un único registro');
+  assert.equal(stored.rows[0].minutes, 60);
+
+  await main.getByRole('button', { name: 'Histórico' }).click();
+  await main.getByRole('tab', { name: 'Estadísticas' }).click();
+  await main.getByLabel('Periodo').selectOption('thisYear');
+  await main.getByText('de tareas comunes').waitFor();
+  await main.getByRole('radio', { name: 'Proporcional' }).click();
+  await main.getByText(/Repartido entre \d+ proyecto/).waitFor();
+  const [none, prop, eq] = await main.evaluate(async () => {
+    const t = new Date();
+    const f = { dateFrom: `${t.getFullYear()}-01-01`, dateTo: `${t.getFullYear()}-12-31` };
+    return Promise.all(['none', 'proportional', 'equal'].map((d) => window.api.entries.stats(f, d)));
+  });
+  const sumWork = (s) => s.byProject.filter((p) => p.kind === 'normal' || p.kind === 'shared').reduce((a, p) => a + p.minutes, 0);
+  assert.ok(Math.abs(sumWork(none) - sumWork(prop)) < 1e-6, 'el total cuadra al repartir');
+  assert.ok(Math.abs(sumWork(none) - sumWork(eq)) < 1e-6);
+  assert.ok(!prop.byProject.some((p) => p.kind === 'shared'));
+  await main.waitForTimeout(300);
+  await main.screenshot({ path: path.join(shots, '14-reparto.png') });
+  await main.getByRole('radio', { name: 'Sin repartir' }).click();
 });
 
 await step('Modo noche y color de acento', async () => {

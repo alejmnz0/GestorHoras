@@ -472,7 +472,7 @@ describe('Migración v1 → v2', () => {
     const r = new Repo(s);
     expect(r.history({}).rows[0]).toMatchObject({ id: 7, description: 'antes', projectKind: 'normal' });
     expect(r.listProjects()[0].kind).toBe('normal');
-    expect(s.get<{ v: number }>('PRAGMA user_version')).toEqual({ user_version: 2 });
+    expect(s.get<{ v: number }>('PRAGMA user_version')).toEqual({ user_version: MIGRATIONS.length });
   });
 });
 
@@ -531,5 +531,178 @@ describe('Correcciones de la revisión v1.1', () => {
     fs.writeFileSync(f, old.export());
     await Store.open(f);
     expect(fs.existsSync(`${f}.antes-v${MIGRATIONS.length}.bak`)).toBe(true);
+  });
+});
+
+describe('Tareas comunes a todos los proyectos', () => {
+  let shared: number;
+  let p2: number;
+  let p3: number;
+  beforeEach(() => {
+    shared = repo.createProject({ code: 'COMUN', name: 'Todos los proyectos', kind: 'shared' }).id;
+    p2 = repo.createProject({ code: 'B', name: 'Backoffice' }).id;
+    p3 = repo.createProject({ code: 'C', name: 'CRM' }).id;
+  });
+
+  it('se imputan una sola vez, con tipo de trabajo real, y cuentan para la jornada', () => {
+    const e = repo.createEntry(entry({ projectId: shared, minutes: 60, workType: 'mantenimiento' }));
+    expect(e.workType).toBe('mantenimiento');
+    expect(e.projectKind).toBe('shared');
+    expect(repo.daySummary(userId, '2026-11-16').imputedMinutes).toBe(60);
+    expect(() => repo.createEntry(entry({ projectId: shared, workType: 'ausencia' }))).toThrow(/tipo de trabajo/);
+    expect(() => repo.createProject({ code: 'COMUN2', name: 'Otro', kind: 'shared' })).toThrow(/Solo puede haber uno/);
+    expect(repo.lastEntry(userId)?.id).toBe(e.id);
+  });
+
+  const seed = () => {
+    repo.createEntry(entry({ date: '2026-11-16', minutes: 240 })); // Portal 4 h
+    repo.createEntry(entry({ date: '2026-11-16', minutes: 120, projectId: p2 })); // Backoffice 2 h
+    repo.createEntry(entry({ date: '2026-11-17', minutes: 60, projectId: p3 })); // CRM 1 h
+    repo.createEntry(entry({ date: '2026-11-17', minutes: 105, projectId: shared, workType: 'mantenimiento' })); // común 1,75 h
+  };
+  const f = { dateFrom: '2026-11-16', dateTo: '2026-11-20' };
+
+  it('sin repartir: aparecen como una línea propia', () => {
+    seed();
+    const s = repo.stats(f, '2026-11-20', 'none');
+    expect(s.distribution).toBe('none');
+    expect(s.sharedMinutes).toBe(105);
+    expect(s.byProject.find((p) => p.kind === 'shared')!.minutes).toBe(105);
+    expect(s.workMinutes).toBe(525);
+  });
+
+  it('proporcional: reparte según las horas de cada proyecto y el total cuadra', () => {
+    seed();
+    const s = repo.stats(f, '2026-11-20', 'proportional');
+    expect(s.distribution).toBe('proportional');
+    expect(s.distributionTargets).toBe(3);
+    expect(s.byProject.some((p) => p.kind === 'shared')).toBe(false);
+    const by = Object.fromEntries(s.byProject.map((p) => [p.code, p]));
+    expect(by['P-001'].sharedMinutes).toBe(60); // 105 × 240/420
+    expect(by['B'].sharedMinutes).toBe(30);
+    expect(by['C'].sharedMinutes).toBe(15);
+    expect(by['P-001'].minutes).toBe(300);
+    const sum = s.byProject.reduce((a, p) => a + p.minutes, 0);
+    expect(sum).toBeCloseTo(525, 9);
+    expect(s.byProject.reduce((a, p) => a + p.percent, 0)).toBeCloseTo(100, 1);
+  });
+
+  it('a partes iguales: puede dar decimales (solo en la vista, nunca en la base de datos)', () => {
+    repo.createEntry(entry({ date: '2026-11-16', minutes: 60 }));
+    repo.createEntry(entry({ date: '2026-11-16', minutes: 60, projectId: p2 }));
+    repo.createEntry(entry({ date: '2026-11-16', minutes: 60, projectId: p3 }));
+    repo.createEntry(entry({ date: '2026-11-17', minutes: 100 - 10, projectId: shared, workType: 'desarrollo' })); // 1,5 h
+    const s = repo.stats(f, '2026-11-20', 'equal');
+    for (const p of s.byProject) expect(p.sharedMinutes).toBeCloseTo(30, 9);
+    // En la base de datos sigue habiendo un único registro de 90 min
+    expect(repo.history({ projectId: shared }).rows.map((r) => r.minutes)).toEqual([90]);
+  });
+
+  it('sin horas directas en el periodo se reparte entre los proyectos activos', () => {
+    repo.setProjectActive(p3, false);
+    repo.createEntry(entry({ date: '2026-11-17', minutes: 120, projectId: shared, workType: 'desarrollo' }));
+    const s = repo.stats(f, '2026-11-20', 'proportional');
+    expect(s.distributionTargets).toBe(2); // Portal y Backoffice (CRM inactivo)
+    expect(s.byProject.map((p) => p.sharedMinutes)).toEqual([60, 60]);
+  });
+
+  it('con filtro de proyecto muestra la parte que le corresponde de las comunes', () => {
+    seed();
+    const s = repo.stats({ ...f, projectId }, '2026-11-20', 'proportional');
+    expect(s.byProject).toHaveLength(1);
+    expect(s.byProject[0]).toMatchObject({ code: 'P-001', directMinutes: 240, sharedMinutes: 60, minutes: 300 });
+  });
+
+  it('las ausencias no participan en el reparto', () => {
+    seed();
+    const vac = repo.createProject({ code: 'VAC', name: 'Vacaciones', kind: 'vacation' }).id;
+    repo.createEntry(entry({ date: '2026-11-18', minutes: 495, projectId: vac }));
+    const s = repo.stats(f, '2026-11-20', 'proportional');
+    expect(s.byProject.find((p) => p.kind === 'vacation')!.sharedMinutes).toBe(0);
+    expect(s.distributionTargets).toBe(3);
+  });
+
+  it('sin tareas comunes, repartir no cambia nada', () => {
+    repo.createEntry(entry({ minutes: 60 }));
+    const s = repo.stats(f, '2026-11-20', 'proportional');
+    expect(s.distribution).toBe('none');
+    expect(s.byProject[0].minutes).toBe(60);
+  });
+});
+
+describe('Migración v2 → v3', () => {
+  it('amplía los tipos de proyecto conservando proyectos, ids e imputaciones', async () => {
+    const { loadSqlJs, MIGRATIONS } = await import('../electron/db');
+    const SQL = await loadSqlJs();
+    const old = new SQL.Database();
+    old.exec(MIGRATIONS[0]);
+    old.exec(MIGRATIONS[1]);
+    old.exec('PRAGMA user_version = 2');
+    old.exec(`INSERT INTO users VALUES (1,'Ana','x','x');
+      INSERT INTO projects (id, code, name, active, created_at, updated_at, kind) VALUES (5,'VAC','Vacaciones',1,'x','x','vacation'), (9,'P','Proy',0,'x','x','normal');
+      INSERT INTO time_entries VALUES (3,1,9,'2026-01-05',60,'desarrollo','antes','x','x'), (4,1,5,'2026-01-06',495,'ausencia','','x','x');`);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gh-'));
+    const file = path.join(dir, 'v2.sqlite');
+    fs.writeFileSync(file, old.export());
+    const s = await Store.open(file);
+    const r = new Repo(s);
+    expect(r.listProjects({ includeInactive: true }).map((p) => [p.id, p.kind, p.active])).toEqual(
+      expect.arrayContaining([
+        [5, 'vacation', true],
+        [9, 'normal', false],
+      ]),
+    );
+    expect(r.history({}).rows.map((e) => e.id).sort()).toEqual([3, 4]);
+    expect(() => r.createProject({ code: 'C', name: 'Común', kind: 'shared' })).not.toThrow();
+    expect(() => r.createProject({ code: 'V2', name: 'Vac2', kind: 'vacation' })).toThrow(/Solo puede/);
+    expect(() => r.deleteProject(9)).toThrow(/imputación/); // integridad referencial intacta
+    expect(s.get<{ v: number }>('PRAGMA foreign_keys')).toEqual({ foreign_keys: 1 });
+  });
+});
+
+describe('Reparto de tareas comunes con filtros (revisión v1.2)', () => {
+  let shared: number;
+  let p2: number;
+  beforeEach(() => {
+    shared = repo.createProject({ code: 'COMUN', name: 'Todos los proyectos', kind: 'shared' }).id;
+    p2 = repo.createProject({ code: 'B', name: 'Backoffice' }).id;
+    repo.createEntry(entry({ date: '2026-11-16', minutes: 180 }));
+    repo.createEntry(entry({ date: '2026-11-16', minutes: 60, projectId: p2 }));
+    repo.createEntry(entry({ date: '2026-11-17', minutes: 60, projectId: shared, workType: 'mantenimiento' }));
+  });
+  const f = { dateFrom: '2026-11-16', dateTo: '2026-11-20' };
+
+  it('con filtro de proyecto sigue informando de las horas comunes (para mostrar el selector)', () => {
+    const s = repo.stats({ ...f, projectId }, '2026-11-20', 'proportional');
+    expect(s.sharedMinutes).toBe(60);
+    expect(s.narrowed).toBe(true);
+    expect(s.byProject[0]).toMatchObject({ directMinutes: 180, sharedMinutes: 45 });
+    const none = repo.stats({ ...f, projectId }, '2026-11-20', 'none');
+    expect(none.sharedMinutes).toBe(60);
+    expect(none.distribution).toBe('none');
+  });
+
+  it('filtrar por el propio proyecto común no lo reparte ni deja la tabla vacía', () => {
+    const s = repo.stats({ ...f, projectId: shared }, '2026-11-20', 'equal');
+    expect(s.distribution).toBe('none');
+    expect(s.byProject).toHaveLength(1);
+    expect(s.byProject[0].kind).toBe('shared');
+    const q = repo.stats({ ...f, search: 'COMUN' }, '2026-11-20', 'equal');
+    expect(q.byProject.map((p) => p.kind)).toEqual(['shared']);
+  });
+
+  it('una base con imputaciones huérfanas da un mensaje claro al migrar', async () => {
+    const { loadSqlJs, MIGRATIONS } = await import('../electron/db');
+    const SQL = await loadSqlJs();
+    const old = new SQL.Database();
+    old.exec(MIGRATIONS[0]);
+    old.exec(MIGRATIONS[1]);
+    old.exec('PRAGMA user_version = 2; PRAGMA foreign_keys = OFF;');
+    old.exec(`INSERT INTO users VALUES (1,'Ana','x','x'); INSERT INTO time_entries VALUES (1,1,99,'2026-01-05',60,'desarrollo','','x','x');`);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gh-'));
+    const file = path.join(dir, 'huerfanos.sqlite');
+    fs.writeFileSync(file, old.export());
+    await expect(Store.open(file)).rejects.toThrow(/inexistentes/);
+    expect(() => importBackup(store, file, path.join(dir, 'c'))).toThrow(/referencias rotas/);
   });
 });

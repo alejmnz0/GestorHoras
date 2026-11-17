@@ -4,8 +4,8 @@
  */
 import { FolderKanban, Pencil, Plus, Power, PowerOff, Search, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { PROJECT_CODE_MAX_LENGTH, PROJECT_KINDS, PROJECT_NAME_MAX_LENGTH } from '../../shared/rules';
-import type { AbsenceKind, Project, ProjectKind } from '../../shared/types';
+import { PROJECT_CODE_MAX_LENGTH, PROJECT_KINDS, PROJECT_NAME_MAX_LENGTH, isAbsenceKind } from '../../shared/rules';
+import type { Project, ProjectKind } from '../../shared/types';
 import { useToast } from '../components/Toast';
 import {
   Badge,
@@ -141,7 +141,7 @@ export function ProyectosPage() {
                 <td className={cx('px-4 py-2.5 font-medium', p.active ? 'text-slate-800' : 'text-slate-400')}>
                   {p.name}
                   {p.kind !== 'normal' && (
-                    <Badge tone="green" className="ml-2">
+                    <Badge tone={p.kind === 'shared' ? 'blue' : 'green'} className="ml-2">
                       {PROJECT_KINDS.find((k) => k.value === p.kind)?.emoji} {PROJECT_KINDS.find((k) => k.value === p.kind)?.label}
                     </Badge>
                   )}
@@ -209,24 +209,35 @@ function SpecialProjects({
   onEdit,
 }: {
   projects: Project[];
-  onConfigure: (kind: AbsenceKind) => void;
+  onConfigure: (kind: ProjectKind) => void;
   onEdit: (p: Project) => void;
 }) {
   return (
-    <div className="mb-5 grid grid-cols-2 gap-3">
+    <div className="mb-5 grid grid-cols-3 gap-3">
       {PROJECT_KINDS.filter((k) => k.value !== 'normal').map((k) => {
         const p = projects.find((x) => x.kind === k.value);
         return (
           <Card key={k.value} className="flex items-center gap-3 p-4">
-            <span className="flex size-10 items-center justify-center rounded-xl bg-emerald-50 text-xl">{k.emoji}</span>
+            <span
+              className={cx(
+                'flex size-10 shrink-0 items-center justify-center rounded-xl text-xl',
+                k.value === 'shared' ? 'bg-blue-50' : 'bg-emerald-50',
+              )}
+            >
+              {k.emoji}
+            </span>
             <div className="min-w-0 flex-1">
-              <p className="text-[13px] font-semibold text-slate-800">Proyecto especial de {k.label}</p>
-              <p className="truncate text-xs text-slate-500">
+              <p className="truncate text-[13px] font-semibold text-slate-800">
+                {k.value === 'shared' ? 'Tareas comunes (todos)' : k.label}
+              </p>
+              <p className="truncate text-xs text-slate-500" title={p ? `${p.name} (${p.code})` : undefined}>
                 {p
-                  ? `${p.name} (${p.code}) · ${p.entryCount} imputación(es)${p.active ? '' : ' · inactivo'}`
-                  : k.value === 'vacation'
-                    ? 'Sin configurar: necesario para registrar vacaciones.'
-                    : 'Sin configurar: necesario para registrar bajas laborales.'}
+                  ? `${p.name} · ${p.entryCount} imputación(es)${p.active ? '' : ' · inactivo'}`
+                  : k.value === 'shared'
+                    ? 'Para tareas que afectan a todos'
+                    : k.value === 'vacation'
+                      ? 'Necesario para vacaciones'
+                      : 'Necesario para bajas laborales'}
               </p>
             </div>
             {p ? (
@@ -234,7 +245,13 @@ function SpecialProjects({
                 Editar
               </Button>
             ) : (
-              <Button size="sm" variant="subtle" icon={<Plus className="size-3.5" />} onClick={() => onConfigure(k.value as AbsenceKind)}>
+              <Button
+                size="sm"
+                variant="subtle"
+                aria-label={`Configurar ${k.value === 'shared' ? 'tareas comunes' : k.label}`}
+                icon={<Plus className="size-3.5" />}
+                onClick={() => onConfigure(k.value)}
+              >
                 Configurar
               </Button>
             )}
@@ -268,8 +285,14 @@ function ProjectModal({
     if ('newKind' in project) {
       const k = project.newKind;
       setKind(k);
-      setCode(k === 'vacation' ? 'VACACIONES' : k === 'sick_leave' ? 'BAJA' : '');
-      setName(k === 'vacation' ? 'Vacaciones' : k === 'sick_leave' ? 'Baja laboral' : '');
+      const defaults: Record<ProjectKind, [string, string]> = {
+        normal: ['', ''],
+        shared: ['COMUN', 'Todos los proyectos'],
+        vacation: ['VACACIONES', 'Vacaciones'],
+        sick_leave: ['BAJA', 'Baja laboral'],
+      };
+      setCode(defaults[k][0]);
+      setName(defaults[k][1]);
       setActive(true);
     } else {
       setCode(project.code);
@@ -330,7 +353,7 @@ function ProjectModal({
           />
         </Field>
         <Field label="Tipo de proyecto" group hint={locked ? 'No se puede cambiar: ya tiene imputaciones' : undefined}>
-          <div className="grid grid-cols-3 gap-1 rounded-xl bg-slate-100 p-1">
+          <div className="grid grid-cols-4 gap-1 rounded-xl bg-slate-100 p-1">
             {PROJECT_KINDS.map((k) => (
               <button
                 key={k.value}
@@ -339,7 +362,7 @@ function ProjectModal({
                 aria-pressed={kind === k.value}
                 onClick={() => setKind(k.value)}
                 className={cx(
-                  'h-8 rounded-lg text-[13px] font-medium transition disabled:cursor-not-allowed',
+                  'h-8 truncate rounded-lg px-1 text-[12px] font-medium transition disabled:cursor-not-allowed',
                   kind === k.value ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200' : 'text-slate-500 hover:text-slate-800',
                 )}
               >
@@ -347,9 +370,15 @@ function ProjectModal({
               </button>
             ))}
           </div>
-          {kind !== 'normal' && (
+          {isAbsenceKind(kind) && (
             <p className="mt-1.5 text-xs text-slate-500">
               Las imputaciones a este proyecto cuentan como ausencia y completan la jornada. Solo puede haber uno.
+            </p>
+          )}
+          {kind === 'shared' && (
+            <p className="mt-1.5 text-xs text-slate-500">
+              Para tareas que afectan a todos los proyectos. Se imputan una vez con horas exactas y en Estadísticas
+              puedes verlas repartidas (proporcional o a partes iguales) o sin repartir. Solo puede haber uno.
             </p>
           )}
         </Field>

@@ -5,8 +5,17 @@
  */
 import { BarChart3, CalendarCheck2, CalendarX2, Gauge, Hourglass, Stethoscope, Palmtree, TrendingUp } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { PROJECT_KINDS, formatDate, formatHours, formatPercent, workTypeLabel } from '../../shared/rules';
-import type { StatsResult, WorkType } from '../../shared/types';
+import {
+  PROJECT_KINDS,
+  SHARED_DISTRIBUTIONS,
+  formatDate,
+  formatHours,
+  formatPercent,
+  isAbsenceKind,
+  isWorkKind,
+  workTypeLabel,
+} from '../../shared/rules';
+import type { SharedDistribution, StatsResult, WorkType } from '../../shared/types';
 import { Badge, Button, Card, EmptyState, cx } from './ui';
 
 const TYPE_COLOR: Record<WorkType, string> = {
@@ -21,7 +30,11 @@ export function StatsView({
   userName,
   maxDailyMinutes,
   onOpenDay,
+  distribution,
+  onDistributionChange,
 }: {
+  distribution: SharedDistribution;
+  onDistributionChange: (d: SharedDistribution) => void;
   stats: StatsResult | null;
   userName: string | null;
   maxDailyMinutes: number;
@@ -38,8 +51,9 @@ export function StatsView({
     );
   }
   const s = stats;
-  const workProjects = s.byProject.filter((p) => p.kind === 'normal');
-  const absenceProjects = s.byProject.filter((p) => p.kind !== 'normal');
+  const workProjects = s.byProject.filter((p) => isWorkKind(p.kind));
+  const absenceProjects = s.byProject.filter((p) => isAbsenceKind(p.kind));
+  const distributed = s.distribution !== 'none';
   const maxProject = Math.max(1, ...workProjects.map((p) => p.minutes));
 
   return (
@@ -136,14 +150,53 @@ export function StatsView({
         <Kpi
           icon={<BarChart3 className="size-4" />}
           label="Proyectos con horas"
-          value={String(workProjects.length)}
-          sub={workProjects[0] ? `Principal: ${workProjects[0].name}` : '—'}
+          value={String(workProjects.filter((p) => p.kind === 'normal').length)}
+          sub={workProjects.find((p) => p.kind === 'normal') ? `Principal: ${workProjects.find((p) => p.kind === 'normal')!.name}` : '—'}
         />
       </div>
 
       <div className="grid grid-cols-12 gap-4">
         <Card className="col-span-7">
-          <CardTitle title="Horas por proyecto" hint="% sobre las horas de trabajo" />
+          <CardTitle
+            title="Horas por proyecto"
+            hint={
+              distributed && s.narrowed
+                ? '% sobre el trabajo de todo el periodo (sin filtrar)'
+                : '% sobre las horas de trabajo'
+            }
+          />
+          {s.sharedMinutes > 0 && (
+            <div className="mx-5 mb-3 rounded-xl border border-blue-200 bg-blue-50 p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-[13px] text-blue-700">
+                  🌐 <b>{formatHours(s.sharedMinutes)} h</b> de tareas comunes
+                </p>
+                <div className="flex rounded-lg bg-white p-0.5 shadow-sm" role="radiogroup" aria-label="Reparto de tareas comunes">
+                  {SHARED_DISTRIBUTIONS.map((d) => (
+                    <button
+                      key={d.value}
+                      type="button"
+                      role="radio"
+                      aria-checked={distribution === d.value}
+                      title={d.hint}
+                      onClick={() => onDistributionChange(d.value)}
+                      className={cx(
+                        'h-7 rounded-md px-2.5 text-xs font-medium transition',
+                        distribution === d.value ? 'bg-brand-600 text-on-accent' : 'text-slate-500 hover:text-slate-800',
+                      )}
+                    >
+                      {d.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <p className="mt-1.5 text-xs text-blue-700/80">
+                {distributed
+                  ? `${SHARED_DISTRIBUTIONS.find((d) => d.value === s.distribution)?.hint} Repartido entre ${s.distributionTargets} proyecto(s). Solo es una vista: lo imputado no cambia y el total cuadra.`
+                  : 'Se muestran en su propia línea. Elige un reparto para ver cuánto supondrían en cada proyecto.'}
+              </p>
+            </div>
+          )}
           {workProjects.length === 0 && absenceProjects.length === 0 ? (
             <p className="px-5 pb-5 text-[13px] text-slate-500">Sin datos.</p>
           ) : (
@@ -159,20 +212,44 @@ export function StatsView({
               </thead>
               <tbody>
                 {workProjects.map((p) => (
-                  <tr key={p.projectId} className="border-t border-slate-100" title={`${p.name}: ${formatHours(p.minutes)} h (${formatPercent(p.percent)})`}>
+                  <tr
+                    key={p.projectId}
+                    className={cx('border-t border-slate-100', p.kind === 'shared' && 'bg-blue-50/50')}
+                    title={
+                      distributed
+                        ? `${p.name}: ${formatHours(p.directMinutes)} h directas + ${formatHours(p.sharedMinutes)} h comunes`
+                        : `${p.name}: ${formatHours(p.minutes)} h (${formatPercent(p.percent)})`
+                    }
+                  >
                     <td className="max-w-0 px-5 py-2">
-                      <p className="truncate font-medium text-slate-800">{p.name}</p>
+                      <p className="truncate font-medium text-slate-800">
+                        {p.kind === 'shared' && '🌐 '}
+                        {p.name}
+                      </p>
                       <p className="font-mono text-[11px] text-slate-400">
                         {p.code}
                         {!p.active && ' · inactivo'}
                       </p>
                     </td>
                     <td className="py-2 pr-3">
-                      <div className="h-2 overflow-hidden rounded-full bg-slate-100">
-                        <div className="h-full rounded-full bg-brand-600" style={{ width: `${(p.minutes / maxProject) * 100}%` }} />
+                      <div className="flex h-2 gap-[2px] overflow-hidden rounded-full bg-slate-100">
+                        <div
+                          className={cx('h-full', p.kind === 'shared' ? 'bg-blue-400' : 'bg-brand-600', p.sharedMinutes === 0 && 'rounded-r-full')}
+                          style={{ width: `${(p.directMinutes / maxProject) * 100}%` }}
+                        />
+                        {p.sharedMinutes > 0 && (
+                          <div className="h-full rounded-r-full bg-blue-400" style={{ width: `${(p.sharedMinutes / maxProject) * 100}%` }} />
+                        )}
                       </div>
                     </td>
-                    <td className="py-2 text-right font-semibold tabular-nums text-slate-900">{formatHours(p.minutes)}</td>
+                    <td className="py-2 text-right tabular-nums">
+                      <p className="font-semibold text-slate-900">{formatHours(p.minutes)}</p>
+                      {p.sharedMinutes > 0 && (
+                        <p className="text-[11px] text-slate-400">
+                          {formatHours(p.directMinutes)} + <span className="text-blue-600">{formatHours(p.sharedMinutes)}</span>
+                        </p>
+                      )}
+                    </td>
                     <td className="py-2 text-right tabular-nums text-slate-600">{formatPercent(p.percent)}</td>
                     <td className="px-5 py-2 text-right tabular-nums text-slate-400">{p.entries}</td>
                   </tr>
@@ -193,6 +270,18 @@ export function StatsView({
               </tbody>
               {workProjects.length > 0 && (
                 <tfoot>
+                  {distributed && (
+                    <tr>
+                      <td colSpan={5} className="px-5 pt-2 text-xs text-slate-400">
+                        <span className="mr-3 inline-flex items-center gap-1.5">
+                          <span className="size-2.5 rounded-sm bg-brand-600" /> Horas directas
+                        </span>
+                        <span className="inline-flex items-center gap-1.5">
+                          <span className="size-2.5 rounded-sm bg-blue-400" /> Parte de tareas comunes
+                        </span>
+                      </td>
+                    </tr>
+                  )}
                   <tr className="border-t border-slate-200 font-semibold text-slate-800">
                     <td className="px-5 py-2.5" colSpan={2}>
                       Total trabajo

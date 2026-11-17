@@ -37,6 +37,7 @@ import type {
   ProjectInput,
   ReminderAlert,
   Settings,
+  SharedDistribution,
 } from '../shared/types';
 import type { PauseOption } from '../shared/api';
 
@@ -532,7 +533,9 @@ function registerIpc() {
   handle('entries:update', (id: number, input: EntryInput) => repo.updateEntry(id, input), true);
   handle('entries:remove', (id: number) => repo.deleteEntry(id), true);
   handle('entries:history', (filter: HistoryFilter) => repo.history(filter ?? {}));
-  handle('entries:stats', (filter: HistoryFilter) => repo.stats(filter ?? {}));
+  handle('entries:stats', (filter: HistoryFilter, distribution?: SharedDistribution) =>
+    repo.stats(filter ?? {}, todayIso(), distribution === 'proportional' || distribution === 'equal' ? distribution : 'none'),
+  );
   handle('entries:last', (userId: number) => repo.lastEntry(userId));
   handle('entries:registerAbsence', (input: AbsenceInput) => repo.registerAbsence(input), true);
   handle('entries:exportHistory', async (filter: HistoryFilter, format: 'xlsx' | 'csv') => {

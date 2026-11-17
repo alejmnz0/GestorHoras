@@ -4,7 +4,7 @@
  */
 import { ClipboardList, Copy, MonitorDown, Palmtree, Pencil, Repeat2, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { PROJECT_KINDS, formatDateLong, formatHours, todayIso, workTypeLabel } from '../../shared/rules';
+import { PROJECT_KINDS, formatDateLong, isAbsenceKind, formatHours, todayIso, workTypeLabel } from '../../shared/rules';
 import type { DayData, Project, TimeEntry } from '../../shared/types';
 import { AbsenceModal } from '../components/AbsenceModal';
 import { DaySummaryCard } from '../components/DaySummaryCard';
@@ -324,7 +324,7 @@ export function ImputarPage({
                         </div>
                         <div className="mt-1 flex items-center gap-2">
                           <Badge tone={workTypeTone(e.workType)}>
-                            {e.projectKind === 'normal' ? workTypeLabel(e.workType) : kind?.label}
+                            {isAbsenceKind(e.projectKind) ? kind?.label : workTypeLabel(e.workType)}
                           </Badge>
                           {e.description && <p className="truncate text-xs text-slate-500">{e.description}</p>}
                         </div>

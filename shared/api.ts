@@ -6,6 +6,7 @@ import type {
   AbsenceInput,
   AbsenceResult,
   StatsResult,
+  SharedDistribution,
   AppInfo,
   DayData,
   DaySummary,
@@ -47,7 +48,7 @@ export interface Api {
     update(id: number, input: EntryInput): Promise<TimeEntry>;
     remove(id: number): Promise<void>;
     history(filter: HistoryFilter): Promise<HistoryResult>;
-    stats(filter: HistoryFilter): Promise<StatsResult>;
+    stats(filter: HistoryFilter, distribution?: SharedDistribution): Promise<StatsResult>;
     /** Última imputación del usuario o null. */
     last(userId: number): Promise<TimeEntry | null>;
     registerAbsence(input: AbsenceInput): Promise<AbsenceResult>;

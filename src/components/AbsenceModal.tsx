@@ -3,7 +3,7 @@
  * Cada día se completa con lo pendiente, o con las horas indicadas (medias jornadas).
  */
 import { useEffect, useMemo, useState } from 'react';
-import { PROJECT_KINDS, dateRange, formatDate, formatHours, isValidIsoDate, isWorkday } from '../../shared/rules';
+import { PROJECT_KINDS, dateRange, isAbsenceKind, formatDate, formatHours, isValidIsoDate, isWorkday } from '../../shared/rules';
 import type { AbsenceKind, Project } from '../../shared/types';
 import { api, errorMessage } from '../lib/api';
 import { useApp } from '../lib/appContext';
@@ -40,7 +40,7 @@ export function AbsenceModal({
     setTo(initialDate);
     setError(null);
     setDescription('');
-    api.projects.list({ includeInactive: true }).then((all) => setSpecial(all.filter((p) => p.kind !== 'normal')));
+    api.projects.list({ includeInactive: true }).then((all) => setSpecial(all.filter((p) => isAbsenceKind(p.kind))));
   }, [open, initialDate]);
 
   const project = special.find((p) => p.kind === kind);
@@ -90,7 +90,7 @@ export function AbsenceModal({
     >
       <div className="space-y-4">
         <div className="grid grid-cols-2 gap-2">
-          {PROJECT_KINDS.filter((k) => k.value !== 'normal').map((k) => (
+          {PROJECT_KINDS.filter((k) => isAbsenceKind(k.value)).map((k) => (
             <button
               key={k.value}
               type="button"
