@@ -26,11 +26,11 @@ export function Button({
   icon?: ReactNode;
 }) {
   const variants: Record<Variant, string> = {
-    primary: 'bg-brand-600 text-white hover:bg-brand-700 shadow-sm shadow-brand-600/20 disabled:bg-brand-600/50',
+    primary: 'bg-brand-600 text-on-accent hover:bg-[color-mix(in_oklab,var(--color-brand-600)_86%,black)] shadow-sm shadow-brand-600/20 disabled:bg-brand-600/50',
     secondary: 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 hover:border-slate-300 shadow-sm',
     ghost: 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
     subtle: 'bg-brand-50 text-brand-700 hover:bg-brand-100',
-    danger: 'bg-red-600 text-white hover:bg-red-700 shadow-sm',
+    danger: 'bg-[#dc2626] text-on-accent hover:bg-[#b91c1c] shadow-sm',
   };
   const sizes = { sm: 'h-8 px-2.5 text-[13px] gap-1.5', md: 'h-9 px-3.5 text-sm gap-2', lg: 'h-11 px-5 text-[15px] gap-2' };
   return (
@@ -163,7 +163,7 @@ export function Toggle({
     >
       <span
         className={cx(
-          'inline-block size-4 rounded-full bg-white shadow transition-transform',
+          'inline-block size-4 rounded-full bg-on-accent shadow transition-transform',
           checked ? 'translate-x-[18px]' : 'translate-x-0.5',
         )}
       />
@@ -218,8 +218,8 @@ export function Modal({
   }, [open, onClose]);
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/30 p-6 backdrop-blur-[2px] fade-in">
-      <div className={cx('pop-in w-full rounded-2xl bg-white shadow-2xl shadow-slate-900/20', width)} role="dialog" aria-label={title}>
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-6 backdrop-blur-[2px] fade-in">
+      <div className={cx('pop-in w-full rounded-2xl bg-white shadow-2xl shadow-black/25', width)} role="dialog" aria-label={title}>
         <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
           <h2 className="text-base font-semibold text-slate-900">{title}</h2>
           <IconButton label="Cerrar" onClick={onClose}>
@@ -293,6 +293,6 @@ export function EmptyState({ icon, title, children }: { icon: ReactNode; title: 
   );
 }
 
-export function workTypeTone(t: string): 'red' | 'blue' | 'violet' {
-  return t === 'incidencia' ? 'red' : t === 'desarrollo' ? 'blue' : 'violet';
+export function workTypeTone(t: string): 'red' | 'blue' | 'violet' | 'green' {
+  return t === 'incidencia' ? 'red' : t === 'desarrollo' ? 'blue' : t === 'ausencia' ? 'green' : 'violet';
 }

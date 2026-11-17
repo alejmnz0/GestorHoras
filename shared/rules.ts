@@ -2,7 +2,7 @@
  * Reglas de negocio y utilidades puras. Se usan en el backend (validación definitiva)
  * y en la interfaz (validación inmediata), de modo que ambas capas aplican lo mismo.
  */
-import type { Settings, WorkType } from './types';
+import type { Accent, ProjectKind, Settings, Theme, WorkType } from './types';
 
 export const SLOT_MINUTES = 15;
 export const DEFAULT_MAX_DAILY_MINUTES = 495; // 8,25 h
@@ -15,11 +15,98 @@ export const REMINDER_PRESETS = [15, 30, 45, 60, 90] as const;
 export const MIN_REMINDER_MINUTES = 1;
 export const MAX_REMINDER_MINUTES = 480;
 
+/** Tipos seleccionables para proyectos normales. "ausencia" se asigna sola a vacaciones/baja. */
 export const WORK_TYPES: { value: WorkType; label: string }[] = [
   { value: 'incidencia', label: 'Incidencia' },
   { value: 'desarrollo', label: 'Desarrollo' },
   { value: 'mantenimiento', label: 'Mantenimiento' },
 ];
+
+export const PROJECT_KINDS: { value: ProjectKind; label: string; emoji: string }[] = [
+  { value: 'normal', label: 'Normal', emoji: '' },
+  { value: 'vacation', label: 'Vacaciones', emoji: '🌴' },
+  { value: 'sick_leave', label: 'Baja laboral', emoji: '🩺' },
+];
+
+export function projectKindLabel(k: ProjectKind): string {
+  return PROJECT_KINDS.find((p) => p.value === k)?.label ?? k;
+}
+
+export const THEMES: { value: Theme; label: string }[] = [
+  { value: 'light', label: 'Claro' },
+  { value: 'dark', label: 'Oscuro' },
+  { value: 'system', label: 'Sistema' },
+];
+
+export const ACCENTS: { value: Accent; label: string; hex: string }[] = [
+  { value: 'blue', label: 'Azul', hex: '#2563eb' },
+  { value: 'violet', label: 'Violeta', hex: '#7c3aed' },
+  { value: 'green', label: 'Verde', hex: '#059669' },
+  { value: 'orange', label: 'Naranja', hex: '#ea580c' },
+  { value: 'rose', label: 'Rosa', hex: '#e11d48' },
+];
+
+export const WEEKDAYS = [
+  { value: 1, short: 'L', label: 'Lunes' },
+  { value: 2, short: 'M', label: 'Martes' },
+  { value: 3, short: 'X', label: 'Miércoles' },
+  { value: 4, short: 'J', label: 'Jueves' },
+  { value: 5, short: 'V', label: 'Viernes' },
+  { value: 6, short: 'S', label: 'Sábado' },
+  { value: 0, short: 'D', label: 'Domingo' },
+];
+
+/** Día de la semana (0 = domingo) de una fecha YYYY-MM-DD. */
+export function weekdayOf(iso: string): number {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+}
+
+export function isWorkday(iso: string, workDays: number[]): boolean {
+  return workDays.includes(weekdayOf(iso));
+}
+
+export const PERIOD_PRESETS = [
+  { value: 'today', label: 'Hoy' },
+  { value: 'thisWeek', label: 'Esta semana' },
+  { value: 'lastWeek', label: 'Semana pasada' },
+  { value: 'thisMonth', label: 'Este mes' },
+  { value: 'lastMonth', label: 'Mes pasado' },
+  { value: 'thisYear', label: 'Este año' },
+] as const;
+export type PeriodPreset = (typeof PERIOD_PRESETS)[number]['value'];
+
+/** Rango de fechas de un periodo predefinido (semanas de lunes a domingo). */
+export function periodRange(p: PeriodPreset, today: string = todayIso()): { from: string; to: string } {
+  const [y, m] = today.split('-').map(Number);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const monday = addDays(today, -((weekdayOf(today) + 6) % 7));
+  const lastDay = (yy: number, mm: number) => new Date(Date.UTC(yy, mm, 0)).getUTCDate();
+  switch (p) {
+    case 'today':
+      return { from: today, to: today };
+    case 'thisWeek':
+      return { from: monday, to: addDays(monday, 6) };
+    case 'lastWeek':
+      return { from: addDays(monday, -7), to: addDays(monday, -1) };
+    case 'thisMonth':
+      return { from: `${y}-${pad(m)}-01`, to: `${y}-${pad(m)}-${pad(lastDay(y, m))}` };
+    case 'lastMonth': {
+      const py = m === 1 ? y - 1 : y;
+      const pm = m === 1 ? 12 : m - 1;
+      return { from: `${py}-${pad(pm)}-01`, to: `${py}-${pad(pm)}-${pad(lastDay(py, pm))}` };
+    }
+    case 'thisYear':
+      return { from: `${y}-01-01`, to: `${y}-12-31` };
+  }
+}
+
+/** Lista de fechas entre dos fechas incluidas (máx. `limit`). */
+export function dateRange(from: string, to: string, limit = 3700): string[] {
+  const out: string[] = [];
+  for (let d = from; d <= to && out.length < limit; d = addDays(d, 1)) out.push(d);
+  return out;
+}
 
 export const DEFAULT_SETTINGS: Settings = {
   currentUserId: null,
@@ -35,6 +122,9 @@ export const DEFAULT_SETTINGS: Settings = {
   floatingY: null,
   autoStart: false,
   minimizeToTray: true,
+  theme: 'system',
+  accent: 'blue',
+  workDays: [1, 2, 3, 4, 5],
 };
 
 /** Error de validación: su mensaje se muestra tal cual al usuario. */
@@ -46,10 +136,11 @@ export class ValidationError extends Error {
 }
 
 export function isWorkType(v: unknown): v is WorkType {
-  return v === 'incidencia' || v === 'desarrollo' || v === 'mantenimiento';
+  return v === 'incidencia' || v === 'desarrollo' || v === 'mantenimiento' || v === 'ausencia';
 }
 
 export function workTypeLabel(v: WorkType): string {
+  if (v === 'ausencia') return 'Ausencia';
   return WORK_TYPES.find((w) => w.value === v)?.label ?? v;
 }
 
@@ -247,6 +338,22 @@ export function validateSettingsPatch(patch: Record<string, unknown>): Partial<S
       }
       out[k] = v === null ? null : Math.round(v as number);
     }
+  }
+  if ('theme' in patch) {
+    if (!THEMES.some((t) => t.value === patch.theme)) throw new ValidationError('Tema no válido.');
+    out.theme = patch.theme as Theme;
+  }
+  if ('accent' in patch) {
+    if (!ACCENTS.some((a) => a.value === patch.accent)) throw new ValidationError('Color de acento no válido.');
+    out.accent = patch.accent as Accent;
+  }
+  if ('workDays' in patch) {
+    const v = patch.workDays;
+    if (!Array.isArray(v) || v.some((d) => !Number.isInteger(d) || d < 0 || d > 6)) {
+      throw new ValidationError('Días laborables no válidos.');
+    }
+    if (v.length === 0) throw new ValidationError('Debe haber al menos un día laborable.');
+    out.workDays = [...new Set(v as number[])].sort();
   }
   bool('remindersEnabled');
   bool('skipRemindersWhenComplete');

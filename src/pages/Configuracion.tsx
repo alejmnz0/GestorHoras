@@ -8,7 +8,11 @@ import {
   Database,
   Download,
   FolderOpen,
+  Monitor,
   MonitorDown,
+  Moon,
+  Palette,
+  Sun,
   Play,
   RotateCcw,
   Timer,
@@ -17,6 +21,9 @@ import {
 } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 import {
+  ACCENTS,
+  THEMES,
+  WEEKDAYS,
   MAX_REMINDER_MINUTES,
   REMINDER_PRESETS,
   SLOT_MINUTES,
@@ -110,6 +117,52 @@ export function ConfiguracionPage({ onAddUser }: { onAddUser: () => void }) {
       <PageHeader title="Configuración" subtitle="Los cambios se guardan automáticamente." />
 
       <div className="space-y-5">
+        <Section title="Apariencia" description="Modo claro, modo noche o el del sistema, y el color principal." icon={<Palette className="size-4" />}>
+          <Row label="Tema">
+            <div className="flex rounded-lg bg-slate-100 p-0.5" role="radiogroup" aria-label="Tema">
+              {THEMES.map((t) => {
+                const Icon = t.value === 'light' ? Sun : t.value === 'dark' ? Moon : Monitor;
+                return (
+                  <button
+                    key={t.value}
+                    type="button"
+                    role="radio"
+                    aria-checked={settings.theme === t.value}
+                    onClick={() => save({ theme: t.value })}
+                    className={cx(
+                      'flex h-8 items-center gap-1.5 rounded-md px-3 text-[13px] font-medium transition',
+                      settings.theme === t.value ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800',
+                    )}
+                  >
+                    <Icon className="size-3.5" />
+                    {t.label}
+                  </button>
+                );
+              })}
+            </div>
+          </Row>
+          <Row label="Color de acento">
+            <div className="flex gap-2" role="radiogroup" aria-label="Color de acento">
+              {ACCENTS.map((a) => (
+                <button
+                  key={a.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={settings.accent === a.value}
+                  title={a.label}
+                  aria-label={a.label}
+                  onClick={() => save({ accent: a.value })}
+                  className={cx(
+                    'size-7 rounded-full ring-offset-2 ring-offset-white transition hover:scale-110',
+                    settings.accent === a.value && 'ring-2 ring-slate-400',
+                  )}
+                  style={{ background: a.hex }}
+                />
+              ))}
+            </div>
+          </Row>
+        </Section>
+
         <Section title="Usuario" description="Se recuerda automáticamente; no hace falta indicarlo en cada imputación.">
           <Row label="Usuario actual">
             <select
@@ -146,6 +199,30 @@ export function ConfiguracionPage({ onAddUser }: { onAddUser: () => void }) {
         </Section>
 
         <Section title="Jornada" description="Máximo de horas imputables por trabajador y día.">
+          <Row label="Días laborables" hint="Los recordatorios y las estadísticas solo cuentan estos días">
+            <div className="flex gap-1">
+              {WEEKDAYS.map((d) => {
+                const on = settings.workDays.includes(d.value);
+                return (
+                  <button
+                    key={d.value}
+                    type="button"
+                    title={d.label}
+                    aria-pressed={on}
+                    onClick={() =>
+                      save({ workDays: on ? settings.workDays.filter((x) => x !== d.value) : [...settings.workDays, d.value] })
+                    }
+                    className={cx(
+                      'size-8 rounded-lg text-[13px] font-semibold transition',
+                      on ? 'bg-brand-600 text-on-accent' : 'bg-slate-100 text-slate-500 hover:bg-slate-200',
+                    )}
+                  >
+                    {d.short}
+                  </button>
+                );
+              })}
+            </div>
+          </Row>
           <Row label="Horas máximas diarias" hint="Predeterminado: 8,25 h">
             <div className="flex items-center gap-2">
               <Button size="sm" onClick={() => changeMaxDaily(settings.maxDailyMinutes - SLOT_MINUTES)}>

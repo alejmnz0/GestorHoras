@@ -3,6 +3,9 @@
  * Todas las llamadas devuelven promesas; los errores llegan como `Error` con un mensaje legible.
  */
 import type {
+  AbsenceInput,
+  AbsenceResult,
+  StatsResult,
   AppInfo,
   DayData,
   DaySummary,
@@ -44,6 +47,10 @@ export interface Api {
     update(id: number, input: EntryInput): Promise<TimeEntry>;
     remove(id: number): Promise<void>;
     history(filter: HistoryFilter): Promise<HistoryResult>;
+    stats(filter: HistoryFilter): Promise<StatsResult>;
+    /** Última imputación del usuario o null. */
+    last(userId: number): Promise<TimeEntry | null>;
+    registerAbsence(input: AbsenceInput): Promise<AbsenceResult>;
     /** Devuelve la ruta del fichero guardado o null si se canceló. */
     exportHistory(filter: HistoryFilter, format: 'xlsx' | 'csv'): Promise<string | null>;
   };

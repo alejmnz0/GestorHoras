@@ -14,15 +14,31 @@ export function DaySummaryCard({ summary }: { summary: DaySummary | null }) {
           <p className="text-[13px] font-medium text-slate-500">Jornada del día</p>
           <p className="mt-0.5 text-sm text-slate-400">{s ? `${formatHours(s.maxMinutes)} horas` : '—'}</p>
         </div>
+        <div className="flex flex-wrap justify-end gap-1.5">
+        {!!s?.vacationMinutes && (
+          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
+            🌴 Vacaciones
+          </span>
+        )}
+        {!!s?.sickMinutes && (
+          <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700">
+            🩺 Baja
+          </span>
+        )}
         {complete ? (
           <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
             <CheckCircle2 className="size-3.5" /> Día completado
+          </span>
+        ) : s && !s.workday && s.imputedMinutes === 0 ? (
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-500">
+            Día no laborable
           </span>
         ) : (
           <span className="inline-flex items-center gap-1.5 rounded-full bg-orange-50 px-2.5 py-1 text-xs font-semibold text-orange-700">
             <Clock3 className="size-3.5" /> Pendiente
           </span>
         )}
+        </div>
       </div>
 
       <div className="mt-5 grid grid-cols-3 gap-3">

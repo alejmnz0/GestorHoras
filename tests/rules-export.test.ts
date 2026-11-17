@@ -47,6 +47,7 @@ const rows: TimeEntry[] = [
     projectCode: 'P-1',
     projectName: 'Portal; "clientes"',
     projectActive: true,
+    projectKind: 'normal',
     date: '2026-11-16',
     minutes: 135,
     workType: 'incidencia',

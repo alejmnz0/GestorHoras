@@ -1,16 +1,28 @@
 /**
  * Pantalla principal: imputación rápida de horas y estado del día seleccionado.
+ * Incluye duplicar tareas, repetir la última, y registrar vacaciones o baja.
  */
-import { ClipboardList, MonitorDown, Pencil, Trash2 } from 'lucide-react';
+import { ClipboardList, Copy, MonitorDown, Palmtree, Pencil, Repeat2, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { formatDateLong, formatHours, todayIso, workTypeLabel } from '../../shared/rules';
+import { PROJECT_KINDS, formatDateLong, formatHours, todayIso, workTypeLabel } from '../../shared/rules';
 import type { DayData, Project, TimeEntry } from '../../shared/types';
+import { AbsenceModal } from '../components/AbsenceModal';
 import { DaySummaryCard } from '../components/DaySummaryCard';
 import { EntryForm, type EntryFormValues } from '../components/EntryForm';
 import { useToast } from '../components/Toast';
 import { Badge, Button, Card, ConfirmDialog, EmptyState, IconButton, PageHeader, cx, workTypeTone } from '../components/ui';
 import { api, errorMessage } from '../lib/api';
 import { useApp } from '../lib/appContext';
+
+/** Datos con los que otra pantalla abre la imputación (duplicar desde el histórico, completar un día…). */
+export interface ImputarPrefill {
+  date?: string;
+  /** Usuario del día que se abre (p. ej. desde «Días por completar»). */
+  userId?: number | null;
+  copyOf?: TimeEntry;
+  /** Marca para que cada navegación se aplique aunque los datos coincidan. */
+  nonce: number;
+}
 
 const emptyValues = (userId: number | null, date: string, keep?: Partial<EntryFormValues>): EntryFormValues => ({
   userId,
@@ -21,17 +33,31 @@ const emptyValues = (userId: number | null, date: string, keep?: Partial<EntryFo
   description: '',
 });
 
-export function ImputarPage({ onAddUser }: { onAddUser: () => void }) {
+export function ImputarPage({
+  onAddUser,
+  prefill,
+  onGoToProjects,
+}: {
+  onAddUser: () => void;
+  prefill: ImputarPrefill | null;
+  onGoToProjects: () => void;
+}) {
   const { settings, users, dataVersion, updateSettings } = useApp();
   const toast = useToast();
   const [values, setValues] = useState<EntryFormValues>(() => emptyValues(settings.currentUserId, todayIso()));
   const [editingEntry, setEditingEntry] = useState<TimeEntry | null>(null);
   const [day, setDay] = useState<DayData | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [projectsLoaded, setProjectsLoaded] = useState(false);
+  const appliedPrefill = useRef<number | null>(null);
   const [toDelete, setToDelete] = useState<TimeEntry | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [absenceOpen, setAbsenceOpen] = useState(false);
+  const [copiedFrom, setCopiedFrom] = useState<TimeEntry | null>(null);
   const editingRef = useRef<TimeEntry | null>(null);
   editingRef.current = editingEntry;
+  const projectsRef = useRef<Project[]>([]);
+  projectsRef.current = projects;
 
   // Si la app sigue abierta al cambiar de día, el formulario pasa a la nueva fecha
   // (solo si estaba en "hoy" y no se está editando).
@@ -67,10 +93,14 @@ export function ImputarPage({ onAddUser }: { onAddUser: () => void }) {
 
   useEffect(() => {
     void loadDay();
-  }, [loadDay, dataVersion, settings.maxDailyMinutes]);
+  }, [loadDay, dataVersion, settings.maxDailyMinutes, settings.workDays.join(',')]);
 
   useEffect(() => {
-    api.projects.list().then(setProjects).catch(() => setProjects([]));
+    api.projects
+      .list()
+      .then(setProjects)
+      .catch(() => setProjects([]))
+      .finally(() => setProjectsLoaded(true));
   }, [dataVersion]);
 
   // Si el proyecto seleccionado deja de estar activo, se deselecciona (salvo al editar ese registro).
@@ -79,6 +109,52 @@ export function ImputarPage({ onAddUser }: { onAddUser: () => void }) {
       setValues((v) => ({ ...v, projectId: null }));
     }
   }, [projects, values.projectId, editingEntry]);
+
+  /** Copia una tarea en el formulario como registro NUEVO (se puede cambiar proyecto, horas…). */
+  const copyEntry = useCallback(
+    (e: TimeEntry, date?: string) => {
+      const activeProject = projectsRef.current.some((p) => p.id === e.projectId);
+      setEditingEntry(null);
+      setCopiedFrom(e);
+      setValues((v) => ({
+        userId: v.userId,
+        date: date ?? v.date,
+        minutes: e.minutes,
+        projectId: activeProject ? e.projectId : null,
+        workType: e.workType === 'ausencia' ? null : e.workType,
+        description: e.description,
+      }));
+      if (!activeProject) {
+        toast.show('warning', 'Tarea copiada', `El proyecto "${e.projectName}" está inactivo: elige otro.`);
+      }
+    },
+    [toast],
+  );
+
+  // Navegación desde otras pantallas (duplicar desde histórico, completar un día pendiente).
+  // Se espera a tener los proyectos cargados para saber si el de la tarea copiada sigue activo.
+  useEffect(() => {
+    if (!prefill || !projectsLoaded || appliedPrefill.current === prefill.nonce) return;
+    appliedPrefill.current = prefill.nonce;
+    if (prefill.copyOf) copyEntry(prefill.copyOf, prefill.date ?? todayIso());
+    else if (prefill.date) {
+      setEditingEntry(null);
+      const uid = prefill.userId;
+      if (uid && uid !== settings.currentUserId) void updateSettings({ currentUserId: uid });
+      setValues((v) => ({ ...v, date: prefill.date!, userId: uid ?? v.userId }));
+    }
+  }, [prefill, projectsLoaded, copyEntry]);
+
+  async function repeatLast() {
+    if (!values.userId) return;
+    try {
+      const last = await api.entries.last(values.userId);
+      if (!last) return toast.show('info', 'Aún no hay tareas que repetir');
+      copyEntry(last);
+    } catch (e) {
+      toast.error('No se pudo recuperar la última tarea', errorMessage(e));
+    }
+  }
 
   const onChange = (v: EntryFormValues) => {
     if (v.userId !== values.userId && v.userId) {
@@ -91,7 +167,7 @@ export function ImputarPage({ onAddUser }: { onAddUser: () => void }) {
     .filter((e) => e.id !== editingEntry?.id)
     .reduce((s, e) => s + e.minutes, 0);
 
-  const selectableProjects =
+  const selectableProjects: Project[] =
     editingEntry && !projects.some((p) => p.id === editingEntry.projectId)
       ? [
           ...projects,
@@ -100,6 +176,7 @@ export function ImputarPage({ onAddUser }: { onAddUser: () => void }) {
             code: editingEntry.projectCode,
             name: editingEntry.projectName,
             active: false,
+            kind: editingEntry.projectKind,
             entryCount: 1,
             createdAt: '',
             updatedAt: '',
@@ -108,19 +185,21 @@ export function ImputarPage({ onAddUser }: { onAddUser: () => void }) {
       : projects;
 
   function startEdit(e: TimeEntry) {
+    setCopiedFrom(null);
     setEditingEntry(e);
     setValues({
       userId: e.userId,
       date: e.date,
       minutes: e.minutes,
       projectId: e.projectId,
-      workType: e.workType,
+      workType: e.workType === 'ausencia' ? null : e.workType,
       description: e.description,
     });
   }
 
   function cancelEdit() {
     setEditingEntry(null);
+    setCopiedFrom(null);
     setValues((v) => emptyValues(v.userId, v.date));
   }
 
@@ -145,22 +224,43 @@ export function ImputarPage({ onAddUser }: { onAddUser: () => void }) {
         title="Imputar horas"
         subtitle={formatDateLong(values.date)}
         actions={
-          <Button
-            variant="subtle"
-            icon={<MonitorDown className="size-4" />}
-            onClick={() => api.window.toFloating()}
-            title="Oculta esta ventana y deja un pequeño reloj flotante en el escritorio"
-          >
-            Minimizar a reloj flotante
-          </Button>
+          <>
+            <Button icon={<Palmtree className="size-4" />} onClick={() => setAbsenceOpen(true)}>
+              Registrar ausencia
+            </Button>
+            <Button
+              variant="subtle"
+              icon={<MonitorDown className="size-4" />}
+              onClick={() => api.window.toFloating()}
+              title="Oculta esta ventana y deja un pequeño reloj flotante en el escritorio"
+            >
+              Minimizar a reloj flotante
+            </Button>
+          </>
         }
       />
 
       <div className="grid grid-cols-12 gap-6">
         <Card className={cx('col-span-7 p-6', editingEntry && 'ring-2 ring-brand-500/30')}>
-          {editingEntry && (
+          {editingEntry ? (
             <div className="-mt-1 mb-4 flex items-center gap-2 rounded-lg bg-brand-50 px-3 py-2 text-[13px] text-brand-700">
               <Pencil className="size-3.5" /> Editando la imputación de <b>{editingEntry.projectName}</b>
+            </div>
+          ) : copiedFrom ? (
+            <div className="-mt-1 mb-4 flex items-center gap-2 rounded-lg bg-brand-50 px-3 py-2 text-[13px] text-brand-700">
+              <Copy className="size-3.5 shrink-0" />
+              <span className="min-w-0 flex-1 truncate">
+                Copia de <b>{copiedFrom.projectName}</b>: cambia lo que necesites y guárdala como nueva.
+              </span>
+              <button type="button" className="shrink-0 font-medium underline" onClick={cancelEdit}>
+                Descartar
+              </button>
+            </div>
+          ) : (
+            <div className="-mt-2 mb-3 flex justify-end">
+              <Button size="sm" variant="ghost" icon={<Repeat2 className="size-3.5" />} onClick={repeatLast}>
+                Repetir última tarea
+              </Button>
             </div>
           )}
           <EntryForm
@@ -182,6 +282,7 @@ export function ImputarPage({ onAddUser }: { onAddUser: () => void }) {
               } else {
                 await api.entries.create(input);
                 toast.success('Imputación guardada', `${formatHours(input.minutes)} h registradas`);
+                setCopiedFrom(null);
                 // Se mantiene proyecto y tipo para agilizar imputaciones seguidas.
                 setValues((v) => emptyValues(v.userId, v.date, v));
               }
@@ -203,43 +304,63 @@ export function ImputarPage({ onAddUser }: { onAddUser: () => void }) {
               </EmptyState>
             ) : (
               <ul className="max-h-[360px] divide-y divide-slate-100 overflow-y-auto">
-                {day.entries.map((e) => (
-                  <li
-                    key={e.id}
-                    className={cx(
-                      'group flex items-start gap-3 px-5 py-3 transition-colors hover:bg-slate-50/70',
-                      editingEntry?.id === e.id && 'bg-brand-50/60',
-                    )}
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <p className="truncate text-sm font-medium text-slate-800">{e.projectName}</p>
-                        <span className="shrink-0 text-xs text-slate-400">{e.projectCode}</span>
+                {day.entries.map((e) => {
+                  const kind = PROJECT_KINDS.find((k) => k.value === e.projectKind);
+                  return (
+                    <li
+                      key={e.id}
+                      className={cx(
+                        'group flex items-start gap-3 px-5 py-3 transition-colors hover:bg-slate-50/70',
+                        editingEntry?.id === e.id && 'bg-brand-50/60',
+                      )}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <p className="truncate text-sm font-medium text-slate-800">
+                            {kind?.emoji ? `${kind.emoji} ` : ''}
+                            {e.projectName}
+                          </p>
+                          <span className="shrink-0 text-xs text-slate-400">{e.projectCode}</span>
+                        </div>
+                        <div className="mt-1 flex items-center gap-2">
+                          <Badge tone={workTypeTone(e.workType)}>
+                            {e.projectKind === 'normal' ? workTypeLabel(e.workType) : kind?.label}
+                          </Badge>
+                          {e.description && <p className="truncate text-xs text-slate-500">{e.description}</p>}
+                        </div>
                       </div>
-                      <div className="mt-1 flex items-center gap-2">
-                        <Badge tone={workTypeTone(e.workType)}>{workTypeLabel(e.workType)}</Badge>
-                        {e.description && <p className="truncate text-xs text-slate-500">{e.description}</p>}
+                      <span className="shrink-0 pt-0.5 text-sm font-semibold tabular-nums text-slate-900">
+                        {formatHours(e.minutes)} h
+                      </span>
+                      <div className="flex shrink-0 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                        <IconButton label="Duplicar como nueva" onClick={() => copyEntry(e)}>
+                          <Copy className="size-3.5" />
+                        </IconButton>
+                        <IconButton label="Editar" onClick={() => startEdit(e)}>
+                          <Pencil className="size-3.5" />
+                        </IconButton>
+                        <IconButton label="Eliminar" tone="danger" onClick={() => setToDelete(e)}>
+                          <Trash2 className="size-3.5" />
+                        </IconButton>
                       </div>
-                    </div>
-                    <span className="shrink-0 pt-0.5 text-sm font-semibold tabular-nums text-slate-900">
-                      {formatHours(e.minutes)} h
-                    </span>
-                    <div className="flex shrink-0 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-                      <IconButton label="Editar" onClick={() => startEdit(e)}>
-                        <Pencil className="size-3.5" />
-                      </IconButton>
-                      <IconButton label="Eliminar" tone="danger" onClick={() => setToDelete(e)}>
-                        <Trash2 className="size-3.5" />
-                      </IconButton>
-                    </div>
-                  </li>
-                ))}
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </Card>
         </div>
       </div>
 
+      <AbsenceModal
+        open={absenceOpen}
+        initialDate={values.date}
+        onClose={() => setAbsenceOpen(false)}
+        onGoToProjects={() => {
+          setAbsenceOpen(false);
+          onGoToProjects();
+        }}
+      />
       <ConfirmDialog
         open={!!toDelete}
         danger

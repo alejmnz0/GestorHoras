@@ -6,6 +6,8 @@ import {
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
+  BarChart3,
+  Copy,
   ChevronLeft,
   ChevronRight,
   FileSpreadsheet,
@@ -17,8 +19,18 @@ import {
   Trash2,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { WORK_TYPES, formatDate, formatHours, workTypeLabel } from '../../shared/rules';
-import type { HistoryFilter, HistoryResult, Project, SortField, TimeEntry, WorkType } from '../../shared/types';
+import {
+  PERIOD_PRESETS,
+  PROJECT_KINDS,
+  WORK_TYPES,
+  formatDate,
+  formatHours,
+  periodRange,
+  workTypeLabel,
+  type PeriodPreset,
+} from '../../shared/rules';
+import type { HistoryFilter, HistoryResult, Project, SortField, StatsResult, TimeEntry, WorkType } from '../../shared/types';
+import { StatsView } from '../components/StatsView';
 import { EditEntryModal } from '../components/EditEntryModal';
 import { useToast } from '../components/Toast';
 import { Badge, Button, Card, ConfirmDialog, EmptyState, IconButton, PageHeader, cx, inputClass, workTypeTone } from '../components/ui';
@@ -37,8 +49,18 @@ const EMPTY_FILTER: HistoryFilter = {
   sortDir: 'desc',
 };
 
-export function HistoricoPage() {
-  const { users, dataVersion } = useApp();
+type Tab = 'registros' | 'estadisticas';
+
+export function HistoricoPage({
+  onDuplicate,
+  onOpenDay,
+}: {
+  onDuplicate: (entry: TimeEntry) => void;
+  onOpenDay: (date: string, userId: number | null) => void;
+}) {
+  const { users, dataVersion, settings } = useApp();
+  const [tab, setTab] = useState<Tab>('registros');
+  const [stats, setStats] = useState<StatsResult | null>(null);
   const toast = useToast();
   const [filter, setFilter] = useState<HistoryFilter>(EMPTY_FILTER);
   const [search, setSearch] = useState('');
@@ -69,6 +91,27 @@ export function HistoricoPage() {
       alive = false;
     };
   }, [filter, dataVersion]);
+
+  useEffect(() => {
+    if (tab !== 'estadisticas' || (!filter.dateFrom && !filter.dateTo)) return;
+    let alive = true;
+    api.entries
+      .stats(filter)
+      .then((s) => alive && setStats(s))
+      .catch((e) => toast.error('Error al calcular estadísticas', errorMessage(e)));
+    return () => {
+      alive = false;
+    };
+  }, [tab, filter, dataVersion, settings.maxDailyMinutes, settings.workDays.join(',')]);
+
+  const openTab = (k: Tab) => {
+    // Las estadísticas necesitan un periodo: si no hay ninguno se propone «Este mes».
+    if (k === 'estadisticas' && !filter.dateFrom && !filter.dateTo) {
+      const r = periodRange('thisMonth');
+      setFilter((f) => ({ ...f, dateFrom: r.from, dateTo: r.to }));
+    }
+    setTab(k);
+  };
 
   useEffect(() => setPage(0), [filter]);
   useEffect(() => {
@@ -147,6 +190,30 @@ export function HistoricoPage() {
         }
       />
 
+      <div className="mb-4 flex gap-1 rounded-lg bg-slate-100 p-0.5 text-[13px] w-fit" role="tablist">
+        {(
+          [
+            ['registros', 'Registros', Table2],
+            ['estadisticas', 'Estadísticas', BarChart3],
+          ] as const
+        ).map(([k, label, Icon]) => (
+          <button
+            key={k}
+            type="button"
+            role="tab"
+            aria-selected={tab === k}
+            onClick={() => openTab(k)}
+            className={cx(
+              'flex h-8 items-center gap-1.5 rounded-md px-3.5 font-medium transition',
+              tab === k ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800',
+            )}
+          >
+            <Icon className="size-3.5" />
+            {label}
+          </button>
+        ))}
+      </div>
+
       <Card className="mb-4 p-3">
         <div className="flex flex-wrap gap-2">
           <div className="relative w-56 grow">
@@ -197,6 +264,27 @@ export function HistoricoPage() {
                 {w.label}
               </option>
             ))}
+            <option value="ausencia">Ausencias (vacaciones/baja)</option>
+          </select>
+          <select
+            className={cx(inputClass, 'w-40!')}
+            aria-label="Periodo"
+            value={PERIOD_PRESETS.find((p) => {
+              const r = periodRange(p.value);
+              return r.from === filter.dateFrom && r.to === filter.dateTo;
+            })?.value ?? ''}
+            onChange={(e) => {
+              if (!e.target.value) return set({ dateFrom: null, dateTo: null });
+              const r = periodRange(e.target.value as PeriodPreset);
+              set({ dateFrom: r.from, dateTo: r.to });
+            }}
+          >
+            <option value="">{filter.dateFrom || filter.dateTo ? 'Periodo personalizado' : 'Todas las fechas'}</option>
+            {PERIOD_PRESETS.map((p) => (
+              <option key={p.value} value={p.value}>
+                {p.label}
+              </option>
+            ))}
           </select>
           <div className="flex items-center gap-1">
             <input
@@ -243,6 +331,14 @@ export function HistoricoPage() {
         </div>
       </Card>
 
+      {tab === 'estadisticas' ? (
+        <StatsView
+          stats={stats}
+          userName={stats?.userId ? (users.find((u) => u.id === stats.userId)?.name ?? null) : null}
+          maxDailyMinutes={settings.maxDailyMinutes}
+          onOpenDay={onOpenDay}
+        />
+      ) : (
       <Card className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <div className="min-h-0 flex-1 overflow-auto">
           <table className="w-full border-collapse text-[13px]">
@@ -263,7 +359,7 @@ export function HistoricoPage() {
                   Horas
                 </Th>
                 <Th>Descripción</Th>
-                <Th className="w-[76px]" />
+                <Th className="w-[108px]" />
               </tr>
             </thead>
             <tbody>
@@ -275,6 +371,8 @@ export function HistoricoPage() {
                   <Td className="tabular-nums text-slate-700">{formatDate(r.date)}</Td>
                   <Td className="text-slate-700">{r.userName}</Td>
                   <Td className="font-medium text-slate-800">
+                    {PROJECT_KINDS.find((k) => k.value === r.projectKind)?.emoji}
+                    {r.projectKind !== 'normal' && ' '}
                     {r.projectName}
                     {!r.projectActive && <Badge className="ml-1.5">inactivo</Badge>}
                   </Td>
@@ -288,6 +386,9 @@ export function HistoricoPage() {
                   </Td>
                   <Td>
                     <div className="flex justify-end opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                      <IconButton label="Duplicar como nueva (hoy)" onClick={() => onDuplicate(r)}>
+                        <Copy className="size-3.5" />
+                      </IconButton>
                       <IconButton label="Editar" onClick={() => setEditing(r)}>
                         <Pencil className="size-3.5" />
                       </IconButton>
@@ -325,6 +426,8 @@ export function HistoricoPage() {
           </div>
         )}
       </Card>
+
+      )}
 
       <EditEntryModal entry={editing} onClose={() => setEditing(null)} />
       <ConfirmDialog

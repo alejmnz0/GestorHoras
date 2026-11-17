@@ -69,7 +69,7 @@ export function HoursPicker({
             className={cx(
               'h-7 rounded-md border px-2.5 text-xs font-medium tabular-nums transition disabled:opacity-35',
               value === m
-                ? 'border-brand-600 bg-brand-600 text-white'
+                ? 'border-brand-600 bg-brand-600 text-on-accent'
                 : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50',
             )}
           >
@@ -85,7 +85,7 @@ export function HoursPicker({
             className={cx(
               'h-7 rounded-md border px-2.5 text-xs font-medium tabular-nums transition',
               value === max
-                ? 'border-emerald-600 bg-emerald-600 text-white'
+                ? 'border-emerald-600 bg-emerald-600 text-on-accent'
                 : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100',
             )}
           >

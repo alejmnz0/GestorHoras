@@ -7,6 +7,93 @@
   --color-brand-500: #3b7cf6;
   --color-brand-600: #2563eb;
   --color-brand-700: #1d4fd8;
+  /* Texto sobre el color de acento: siempre blanco, también en modo oscuro. */
+  --color-on-accent: #ffffff;
+}
+
+/* ───────────────────────── Temas ─────────────────────────
+ * Los componentes usan la paleta de Tailwind (white, slate-*, brand-*…). Los temas solo
+ * redefinen esas variables, así que todo el interfaz cambia sin duplicar estilos.
+ */
+:root {
+  --app-bg: #f6f7f9;
+  --app-fg: #0f172a;
+  --brand-on-dark: #93b4fd;
+}
+:root[data-accent='violet'] {
+  --color-brand-50: #f5f3ff;
+  --color-brand-100: #ede9fe;
+  --color-brand-500: #8b5cf6;
+  --color-brand-600: #7c3aed;
+  --color-brand-700: #6d28d9;
+  --brand-on-dark: #c4b5fd;
+}
+:root[data-accent='green'] {
+  --color-brand-50: #ecfdf5;
+  --color-brand-100: #d1fae5;
+  --color-brand-500: #10b981;
+  --color-brand-600: #059669;
+  --color-brand-700: #047857;
+  --brand-on-dark: #6ee7b7;
+}
+:root[data-accent='orange'] {
+  --color-brand-50: #fff7ed;
+  --color-brand-100: #ffedd5;
+  --color-brand-500: #f97316;
+  --color-brand-600: #ea580c;
+  --color-brand-700: #c2410c;
+  --brand-on-dark: #fdba74;
+}
+:root[data-accent='rose'] {
+  --color-brand-50: #fff1f2;
+  --color-brand-100: #ffe4e6;
+  --color-brand-500: #f43f5e;
+  --color-brand-600: #e11d48;
+  --color-brand-700: #be123c;
+  --brand-on-dark: #fda4af;
+}
+
+/* Modo noche: superficies oscuras azuladas y escala de grises invertida. */
+:root.dark {
+  color-scheme: dark;
+  --app-bg: #0b1120;
+  --app-fg: #e5e9f0;
+  --color-white: #131b2d;
+  --color-slate-50: #182136;
+  --color-slate-100: #1e2940;
+  --color-slate-200: #2a3650;
+  --color-slate-300: #3a4763;
+  --color-slate-400: #74839c;
+  --color-slate-500: #94a2b8;
+  --color-slate-600: #b2bdcd;
+  --color-slate-700: #cad3df;
+  --color-slate-800: #e1e6ee;
+  --color-slate-900: #f1f4f8;
+  --color-brand-50: color-mix(in oklab, var(--color-brand-600) 18%, #131b2d);
+  --color-brand-100: color-mix(in oklab, var(--color-brand-600) 30%, #131b2d);
+  --color-brand-700: var(--brand-on-dark);
+  --color-blue-50: #1b2a4d;
+  --color-blue-700: #93b4fd;
+  --color-emerald-50: #12302a;
+  --color-emerald-200: #1f5546;
+  --color-emerald-700: #6ee7b7;
+  --color-orange-50: #35231a;
+  --color-orange-200: #6b3d22;
+  --color-orange-700: #fdba74;
+  --color-red-50: #3a1d24;
+  --color-red-200: #6e2c37;
+  --color-red-700: #fca5a5;
+  --color-violet-50: #2a2148;
+  --color-violet-700: #c4b5fd;
+  --color-blue-100: #22355e;
+  --color-emerald-100: #1a4a3d;
+  --color-orange-100: #4a2d1c;
+  --color-red-100: #4d2530;
+  --color-violet-100: #352a5c;
+  --color-red-500: #f87171;
+  --color-red-600: #f87171;
+  --color-amber-50: #33290f;
+  --color-amber-700: #fcd34d;
 }
 
 html,
@@ -17,8 +104,9 @@ body,
 
 body {
   margin: 0;
-  background: #f6f7f9;
-  color: #0f172a;
+  background: var(--app-bg);
+  color: var(--app-fg);
+  transition: background-color 200ms;
   -webkit-font-smoothing: antialiased;
   font-size: 14px;
   user-select: none;

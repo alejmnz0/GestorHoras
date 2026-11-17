@@ -13,6 +13,8 @@ import { formatHours } from '../shared/rules';
 import type { DaySummary } from '../shared/types';
 import { api } from './lib/api';
 import { playChime } from './lib/sound';
+import { applyTheme, watchSystemTheme } from './lib/theme';
+import type { Settings } from '../shared/types';
 import './index.css';
 
 const DRAG_THRESHOLD = 4;
@@ -27,12 +29,25 @@ function FloatingClock() {
   const hovering = useRef(false);
 
   useEffect(() => {
+    let settings: Settings | null = null;
+    const loadTheme = () =>
+      api.settings.get().then((s) => {
+        settings = s;
+        applyTheme(s);
+      });
+    void loadTheme();
+    const offTheme = watchSystemTheme(() => settings);
     const load = () => api.floating.summary().then(setSummary).catch(() => setSummary(null));
     load();
     const t = setInterval(load, 60_000);
     const offs = [
       api.on.dataChanged(load),
-      api.on.settingsChanged(load),
+      api.on.settingsChanged((s) => {
+        settings = s;
+        applyTheme(s);
+        load();
+      }),
+      offTheme,
       api.on.floatingShown(() => {
         hovering.current = false;
         load();
@@ -85,7 +100,7 @@ function FloatingClock() {
 
   const pct = summary ? Math.min(100, summary.percent) : 0;
   const complete = !!summary?.complete;
-  const color = alerting ? '#f97316' : complete ? '#16a34a' : '#2563eb';
+  const color = alerting ? '#f97316' : complete ? '#16a34a' : 'var(--color-brand-600)';
   const tooltip = summary
     ? `Hoy: ${formatHours(summary.imputedMinutes)} h de ${formatHours(summary.maxMinutes)} h · pendientes ${formatHours(summary.pendingMinutes)} h\nClic: imputar horas · Arrastrar: mover · Clic derecho: opciones`
     : 'Clic para imputar horas';
@@ -114,7 +129,7 @@ function FloatingClock() {
         className={`relative flex size-14 cursor-pointer items-center justify-center rounded-full bg-white/95 shadow-[0_4px_14px_rgba(15,23,42,0.22)] ring-1 ring-black/5 transition-transform hover:scale-105 active:scale-95 ${shaking ? 'shake' : ''}`}
       >
         <svg className="absolute inset-0 -rotate-90" viewBox="0 0 56 56" aria-hidden>
-          <circle cx="28" cy="28" r={R} fill="none" stroke="#e2e8f0" strokeWidth="3" />
+          <circle cx="28" cy="28" r={R} fill="none" stroke="var(--color-slate-200)" strokeWidth="3" />
           <circle
             cx="28"
             cy="28"

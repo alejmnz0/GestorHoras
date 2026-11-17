@@ -42,6 +42,9 @@ const api: Api = {
     update: (id, input) => call('entries:update', id, input),
     remove: (id) => call('entries:remove', id),
     history: (filter) => call('entries:history', filter),
+    stats: (filter) => call('entries:stats', filter),
+    last: (userId) => call('entries:last', userId),
+    registerAbsence: (input) => call('entries:registerAbsence', input),
     exportHistory: (filter, format) => call('entries:exportHistory', filter, format),
   },
   settings: {

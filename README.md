@@ -17,11 +17,12 @@ Aplicación de escritorio para Windows, **ligera, privada y 100 % local**, para 
 <br />
 ![SQLite](https://img.shields.io/badge/SQLite-local-003B57?style=for-the-badge&logo=sqlite&logoColor=white)
 ![Tailwind CSS](https://img.shields.io/badge/Tailwind-4-06B6D4?style=for-the-badge&logo=tailwindcss&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-46%20unit%20%2B%2013%20E2E-22C55E?style=for-the-badge&logo=vitest&logoColor=white)
+![Tests](https://img.shields.io/badge/tests-59%20unit%20%2B%2018%20E2E-22C55E?style=for-the-badge&logo=vitest&logoColor=white)
 ![Offline](https://img.shields.io/badge/Internet-no%20necesario-64748B?style=for-the-badge)
 
 <br />
 
+[🆕 Novedades](#-novedades-v11) ·
 [✨ Características](#-características) ·
 [📸 Capturas](#-capturas) ·
 [⬇️ Instalación](#️-instalación) ·
@@ -34,6 +35,39 @@ Aplicación de escritorio para Windows, **ligera, privada y 100 % local**, para 
 ---
 
 <img src="docs/screenshots/imputar.png" alt="Pantalla de imputación de horas" width="100%" />
+
+## 🆕 Novedades v1.1
+
+<table>
+<tr>
+<td width="50%" valign="top">
+
+### 🌙 Modo noche y temas
+Tema **claro**, **oscuro** o el **del sistema**, y cinco colores de acento: azul, violeta, verde, naranja y rosa. Puedes cambiar entre claro y oscuro con un clic desde el menú lateral 🌗.
+
+</td>
+<td width="50%" valign="top">
+
+### 📋 Duplicar tareas
+¿Haces lo mismo en varios proyectos? Pulsa **Duplicar** 📄 en cualquier tarea (del día o del histórico) o **Repetir última tarea**. Cambia el proyecto o lo que quieras y guárdala como un **registro nuevo**.
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+### 📈 Estadísticas
+Nueva pestaña en el **Histórico**: horas y **% por proyecto**, jornada esperada, **cobertura**, media diaria, reparto por tipo, evolución diaria y la lista de **días por completar**, con un botón para imputarlos. Hay periodos rápidos: esta semana, este mes, mes pasado y este año.
+
+</td>
+<td valign="top">
+
+### 🌴 Vacaciones y 🩺 baja
+Configura los **proyectos especiales** de Vacaciones y Baja, y registra un día o un periodo entero de golpe. Los fines de semana se saltan solos, los días ya completos se respetan y puedes registrar medias jornadas. Esos días cuentan como jornada completada.
+
+</td>
+</tr>
+</table>
 
 ## ✨ Características
 
@@ -85,6 +119,17 @@ Sin servidores, cuentas, nube ni telemetría. Todo se guarda en tu PC, con **cop
 ## 📸 Capturas
 
 <table>
+<tr>
+<td colspan="2"><img src="docs/screenshots/estadisticas.png" alt="Estadísticas" /><p align="center"><b>Estadísticas</b>: horas y % por proyecto, cobertura de la jornada y días pendientes</p></td>
+</tr>
+<tr>
+<td width="50%"><img src="docs/screenshots/modo-noche.png" alt="Modo noche" /><p align="center"><b>Modo noche</b> 🌙</p></td>
+<td width="50%"><img src="docs/screenshots/modo-noche-estadisticas.png" alt="Estadísticas en modo noche" /><p align="center"><b>Estadísticas</b> en modo noche</p></td>
+</tr>
+<tr>
+<td width="50%"><img src="docs/screenshots/duplicar.png" alt="Duplicar tarea" /><p align="center"><b>Duplicar</b>: copia una tarea y cambia el proyecto</p></td>
+<td width="50%"><img src="docs/screenshots/ausencia.png" alt="Registrar ausencia" /><p align="center"><b>Ausencias</b>: vacaciones o baja por periodos</p></td>
+</tr>
 <tr>
 <td width="50%"><img src="docs/screenshots/historico.png" alt="Histórico" /><p align="center"><b>Histórico</b>: filtros, orden, totales y exportación</p></td>
 <td width="50%"><img src="docs/screenshots/proyectos.png" alt="Proyectos" /><p align="center"><b>Proyectos</b>: activos, inactivos y búsqueda</p></td>
@@ -145,7 +190,57 @@ La app te pide tu nombre una sola vez y lo recuerda. Puedes cambiarlo o añadir 
 | 🏷️ **Tipo** | 🔴 Incidencia · 🔵 Desarrollo · 🟣 Mantenimiento (obligatorio). |
 | 📝 **Descripción** | Opcional, hasta 500 caracteres. |
 
-Tras guardar se conservan el proyecto y el tipo, para que imputar varias tareas seguidas sea aún más rápido. En **Imputaciones del día** editas ✏️ o eliminas 🗑️ cualquier registro.
+Tras guardar se conservan el proyecto y el tipo, para que imputar varias tareas seguidas sea aún más rápido. En **Imputaciones del día** duplicas 📄, editas ✏️ o eliminas 🗑️ cualquier registro.
+
+</details>
+
+<details>
+<summary><b>📋 Tareas repetitivas: duplicar y repetir</b></summary>
+<br />
+
+- **Duplicar** 📄 (en la lista del día o en el histórico) copia la tarea en el formulario como un **registro nuevo**: horas, proyecto, tipo y descripción. Cambia lo que necesites, por ejemplo el proyecto, y guarda.
+- **Repetir última tarea** recupera la última imputación que hiciste.
+- Desde el histórico, la copia se abre en la fecha de **hoy**. Si el proyecto original está inactivo, te pide que elijas otro.
+- Si la tarea copiada dura más de lo que te queda del día, las horas se ajustan solas a lo disponible.
+
+</details>
+
+<details>
+<summary><b>🌴 Vacaciones y 🩺 baja laboral</b></summary>
+<br />
+
+1. En **Proyectos**, pulsa **Configurar** en *Proyecto especial de Vacaciones* y en *Baja laboral*. Solo puede haber uno de cada tipo.
+2. En **Imputar horas**, pulsa **Registrar ausencia**, elige Vacaciones o Baja e indica el periodo.
+3. Cada día laborable se completa con lo que le falte. Si ya tenía horas, solo se añade el resto, y los días completos se respetan. Desactiva «Jornada completa» para registrar medias jornadas.
+4. También puedes elegir el proyecto de vacaciones o de baja en el formulario normal: el tipo se fija como **Ausencia**.
+
+Los días laborables (L-V por defecto) se configuran en **Configuración → Jornada**, y en los no laborables no hay recordatorios.
+
+</details>
+
+<details>
+<summary><b>📈 Estadísticas</b></summary>
+<br />
+
+En **Histórico → Estadísticas**, con los mismos filtros que la tabla:
+
+| Dato | Qué te dice |
+|---|---|
+| ⏳ Horas imputadas | Total del periodo, separando trabajo y ausencias |
+| 📅 Jornada esperada | Días laborables × jornada: lo que deberías imputar en el periodo |
+| 🎯 Cobertura | % de la jornada cubierta en los días laborables **ya transcurridos** |
+| 📊 Horas por proyecto | Horas, **% de dedicación** y número de registros de cada proyecto |
+| 🧩 Por tipo | Reparto entre desarrollo, incidencias, mantenimiento y ausencias |
+| 📉 Evolución diaria | Barras por día con la línea de la jornada |
+| ⚠️ Días por completar | Días laborables con horas pendientes, con botón **Imputar** |
+
+</details>
+
+<details>
+<summary><b>🎨 Temas</b></summary>
+<br />
+
+En **Configuración → Apariencia** eliges **Claro**, **Oscuro** o **Sistema** (sigue a Windows) y el color de acento. El botón 🌗 del menú lateral alterna entre claro y oscuro. El reloj flotante también adopta el tema.
 
 </details>
 
@@ -189,7 +284,7 @@ Tras guardar se conservan el proyecto y el tipo, para que imputar varias tareas 
 <summary><b>⚙️ Configuración disponible</b></summary>
 <br />
 
-Usuario · jornada máxima diaria (8,25 h por defecto) · intervalo de avisos · sonido y volumen · animación · posición del reloj · iniciar con Windows (arranca directamente como reloj) · bandeja del sistema · copias de seguridad · restaurar valores predeterminados.
+Apariencia (tema y color) · usuario · días laborables · jornada máxima diaria (8,25 h por defecto) · intervalo de avisos · sonido y volumen · animación · posición del reloj · iniciar con Windows (arranca directamente como reloj) · bandeja del sistema · copias de seguridad · restaurar valores predeterminados.
 
 </details>
 
@@ -204,6 +299,9 @@ Usuario · jornada máxima diaria (8,25 h por defecto) · intervalo de avisos ·
 | 5 | Los proyectos con imputaciones **no se borran**: se desactivan. |
 | 6 | Se bloquea el **doble guardado accidental** de un registro idéntico. |
 | 7 | Fechas guardadas en `AAAA-MM-DD` y mostradas en `DD/MM/AAAA`. |
+| 8 | Solo hay **un** proyecto de Vacaciones y **uno** de Baja. Sus imputaciones son siempre de tipo «Ausencia». |
+| 9 | Las ausencias por periodo solo se registran en **días laborables** y nunca superan la jornada. |
+| 10 | No se puede cambiar el tipo de un proyecto que ya tiene imputaciones. |
 
 > [!NOTE]
 > Las horas se guardan internamente como **minutos enteros**, así que nunca hay errores de redondeo decimal (0,1 + 0,2 ≠ 0,3).
@@ -213,7 +311,7 @@ Usuario · jornada máxima diaria (8,25 h por defecto) · intervalo de avisos ·
 ```bash
 npm install     # 📦 instala dependencias (requiere Node.js 20+)
 npm run dev     # 🔥 modo desarrollo (F12 abre DevTools)
-npm test        # 🧪 46 pruebas unitarias y de integración (Vitest)
+npm test        # 🧪 59 pruebas unitarias y de integración (Vitest)
 npm run build   # 🏗️ compila la interfaz y el proceso principal
 npm run dist    # 📦 genera release/GestorHoras-Setup-x.y.z.exe
 ```
@@ -222,7 +320,7 @@ npm run dist    # 📦 genera release/GestorHoras-Setup-x.y.z.exe
 <summary><b>🧪 Pruebas end-to-end</b></summary>
 <br />
 
-`tests/e2e/run.mjs` arranca la **aplicación Electron real** y recorre 13 escenarios: primer uso, proyectos, imputación, límites, edición, histórico, configuración, reloj flotante, **recordatorio real por temporizador con la ventana oculta**, arrastre, restauración, bandeja y persistencia tras reiniciar.
+`tests/e2e/run.mjs` arranca la **aplicación Electron real** y recorre 18 escenarios: primer uso, proyectos, imputación, límites, edición, histórico, configuración, reloj flotante, **recordatorio real por temporizador con la ventana oculta**, arrastre, restauración, bandeja, persistencia tras reiniciar, proyectos especiales, vacaciones por periodo, duplicar y repetir tareas, estadísticas y modo noche.
 
 ```bash
 npm run build

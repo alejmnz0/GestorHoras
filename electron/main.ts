@@ -13,6 +13,7 @@ import {
   dialog,
   ipcMain,
   nativeImage,
+  nativeTheme,
   powerMonitor,
   screen,
   shell,
@@ -27,8 +28,16 @@ import { toCsv, toXlsx } from './exporter';
 import { initLogger, log } from './logger';
 import { ReminderScheduler, endOfToday } from './reminders';
 import { Repo } from './repo';
-import { ValidationError, todayIso } from '../shared/rules';
-import type { EntryInput, HistoryFilter, IpcResult, ProjectInput, ReminderAlert, Settings } from '../shared/types';
+import { ValidationError, isWorkday, todayIso } from '../shared/rules';
+import type {
+  AbsenceInput,
+  EntryInput,
+  HistoryFilter,
+  IpcResult,
+  ProjectInput,
+  ReminderAlert,
+  Settings,
+} from '../shared/types';
 import type { PauseOption } from '../shared/api';
 
 // ---------------------------------------------------------------------------
@@ -104,6 +113,8 @@ async function init() {
     },
     shouldSkip: () => {
       const s = repo.getSettings();
+      // Nunca se avisa en días no laborables (fines de semana por defecto).
+      if (!isWorkday(todayIso(), s.workDays)) return true;
       if (!s.skipRemindersWhenComplete || !s.currentUserId) return false;
       return repo.daySummary(s.currentUserId, todayIso()).complete;
     },
@@ -111,6 +122,7 @@ async function init() {
     onStatus: (st) => broadcast('reminders:status', st),
   });
 
+  applyTheme(repo.getSettings());
   registerIpc();
   createMainWindow();
   createTray();
@@ -169,7 +181,7 @@ function createMainWindow() {
     minHeight: 640,
     show: false,
     title: 'Gestor de Horas',
-    backgroundColor: '#f6f7f9',
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#0b1120' : '#f6f7f9',
     icon: path.join(ASSETS, 'icon.png'),
     webPreferences: secureWebPreferences(),
   });
@@ -401,6 +413,12 @@ function showFloatingContextMenu() {
 // Configuración con efectos secundarios
 // ---------------------------------------------------------------------------
 
+/** Tema claro/oscuro: también afecta a diálogos nativos y a prefers-color-scheme de las ventanas. */
+function applyTheme(s: Settings) {
+  nativeTheme.themeSource = s.theme;
+  mainWindow?.setBackgroundColor(nativeTheme.shouldUseDarkColors ? '#0b1120' : '#f6f7f9');
+}
+
 function applyAutoStart(enabled: boolean) {
   if (!app.isPackaged || process.platform !== 'win32') return;
   try {
@@ -419,6 +437,7 @@ function afterSettingsChanged(before: Settings, after: Settings) {
     refreshTrayMenu();
   }
   if (before.autoStart !== after.autoStart) applyAutoStart(after.autoStart);
+  if (before.theme !== after.theme) applyTheme(after);
   if (before.floatingPosition !== after.floatingPosition && floatingWindow) {
     const p = floatingPosition();
     floatingWindow.setPosition(p.x, p.y);
@@ -513,6 +532,9 @@ function registerIpc() {
   handle('entries:update', (id: number, input: EntryInput) => repo.updateEntry(id, input), true);
   handle('entries:remove', (id: number) => repo.deleteEntry(id), true);
   handle('entries:history', (filter: HistoryFilter) => repo.history(filter ?? {}));
+  handle('entries:stats', (filter: HistoryFilter) => repo.stats(filter ?? {}));
+  handle('entries:last', (userId: number) => repo.lastEntry(userId));
+  handle('entries:registerAbsence', (input: AbsenceInput) => repo.registerAbsence(input), true);
   handle('entries:exportHistory', async (filter: HistoryFilter, format: 'xlsx' | 'csv') => {
     if (format !== 'xlsx' && format !== 'csv') throw new ValidationError('Formato no válido.');
     const { rows, totalMinutes } = repo.history(filter ?? {});

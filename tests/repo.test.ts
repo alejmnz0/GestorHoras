@@ -307,7 +307,7 @@ describe('Casos límite detectados en revisión', () => {
     const f = path.join(dir, 'fake.sqlite');
     fs.writeFileSync(f, fake.export());
     repo.createEntry(entry());
-    expect(() => importBackup(store, f, path.join(dir, 'c'))).toThrow(/estructura distinta/);
+    expect(() => importBackup(store, f, path.join(dir, 'c'))).toThrow(/estructura distinta|formato que esta versión no reconoce/);
     expect(repo.history({}).rows).toHaveLength(1);
   });
 
@@ -328,5 +328,208 @@ describe('Casos límite detectados en revisión', () => {
     s.persist = original;
     expect(s.safePersist()).toBe(true);
     expect(new Repo(await Store.open(path.join(dir, 'db.sqlite'))).listUsers()[0].name).toBe('Disco');
+  });
+});
+
+describe('Vacaciones, baja y proyectos especiales', () => {
+  // 2026-11-16 es lunes
+  let vac: number;
+  beforeEach(() => {
+    vac = repo.createProject({ code: 'VAC', name: 'Vacaciones', kind: 'vacation' }).id;
+  });
+
+  it('solo puede haber un proyecto de cada tipo especial', () => {
+    expect(() => repo.createProject({ code: 'VAC2', name: 'Otras', kind: 'vacation' })).toThrow(/Solo puede haber uno/);
+    expect(() => repo.createProject({ code: 'BAJA', name: 'Baja', kind: 'sick_leave' })).not.toThrow();
+    expect(() => repo.updateProject(projectId, { code: 'P-001', name: 'Portal', kind: 'vacation' })).toThrow(/Solo puede/);
+  });
+
+  it('no cambia el tipo de un proyecto con imputaciones', () => {
+    repo.createEntry(entry());
+    expect(() => repo.updateProject(projectId, { code: 'P-001', name: 'Portal', kind: 'sick_leave' })).toThrow(
+      /tipo de un proyecto/,
+    );
+  });
+
+  it('las imputaciones a proyectos especiales son siempre "ausencia" y los normales no la admiten', () => {
+    const e = repo.createEntry(entry({ projectId: vac, workType: 'desarrollo', minutes: 240 }));
+    expect(e.workType).toBe('ausencia');
+    expect(e.projectKind).toBe('vacation');
+    expect(() => repo.createEntry(entry({ workType: 'ausencia' }))).toThrow(/tipo de trabajo/);
+    const s = repo.daySummary(userId, '2026-11-16');
+    expect(s.vacationMinutes).toBe(240);
+    expect(s.workday).toBe(true);
+  });
+
+  it('registra vacaciones en un rango saltando fines de semana y completando lo pendiente', () => {
+    repo.createEntry(entry({ date: '2026-11-18', minutes: 120 })); // miércoles con 2 h
+    repo.createEntry(entry({ date: '2026-11-19', minutes: 495, workType: 'incidencia' })); // jueves completo
+    const r = repo.registerAbsence({ userId, kind: 'vacation', dateFrom: '2026-11-16', dateTo: '2026-11-23', minutesPerDay: null });
+    expect(r.dates).toEqual(['2026-11-16', '2026-11-17', '2026-11-18', '2026-11-20', '2026-11-23']);
+    expect(r.skippedFull).toEqual(['2026-11-19']);
+    expect(r.skippedNonWorking).toBe(2);
+    expect(repo.daySummary(userId, '2026-11-18').complete).toBe(true);
+    expect(repo.daySummary(userId, '2026-11-18').vacationMinutes).toBe(375);
+    expect(repo.daySummary(userId, '2026-11-16').vacationMinutes).toBe(495);
+  });
+
+  it('permite medias jornadas y exige proyecto de baja configurado', () => {
+    const r = repo.registerAbsence({ userId, kind: 'vacation', dateFrom: '2026-11-16', dateTo: '2026-11-16', minutesPerDay: 240 });
+    expect(r.dates).toHaveLength(1);
+    expect(repo.daySummary(userId, '2026-11-16').imputedMinutes).toBe(240);
+    expect(() =>
+      repo.registerAbsence({ userId, kind: 'sick_leave', dateFrom: '2026-11-16', dateTo: '2026-11-16', minutesPerDay: null }),
+    ).toThrow(/configura el proyecto especial de Baja/);
+  });
+
+  it('valida periodos', () => {
+    expect(() => repo.registerAbsence({ userId, kind: 'vacation', dateFrom: '2026-11-20', dateTo: '2026-11-16', minutesPerDay: null })).toThrow(/anterior/);
+    expect(() => repo.registerAbsence({ userId, kind: 'vacation', dateFrom: '2026-11-21', dateTo: '2026-11-22', minutesPerDay: null })).toThrow(/laborables/);
+    expect(() => repo.registerAbsence({ userId, kind: 'vacation', dateFrom: '2026-01-01', dateTo: '2027-06-01', minutesPerDay: null })).toThrow(/un año/);
+  });
+
+  it('los días laborables son configurables', () => {
+    repo.updateSettings({ workDays: [1, 2, 3, 4, 5, 6] });
+    const r = repo.registerAbsence({ userId, kind: 'vacation', dateFrom: '2026-11-21', dateTo: '2026-11-22', minutesPerDay: null });
+    expect(r.dates).toEqual(['2026-11-21']);
+    expect(() => repo.updateSettings({ workDays: [] })).toThrow(/al menos/);
+  });
+});
+
+describe('Repetir última tarea', () => {
+  it('devuelve la última imputación creada del usuario', () => {
+    expect(repo.lastEntry(userId)).toBeNull();
+    repo.createEntry(entry({ date: '2026-11-20', minutes: 30 }));
+    tick();
+    const last = repo.createEntry(entry({ date: '2026-11-10', minutes: 45, description: 'última' }));
+    expect(repo.lastEntry(userId)?.id).toBe(last.id);
+  });
+});
+
+describe('Estadísticas', () => {
+  beforeEach(() => {
+    const p2 = repo.createProject({ code: 'B', name: 'Backoffice' }).id;
+    const vac = repo.createProject({ code: 'VAC', name: 'Vacaciones', kind: 'vacation' }).id;
+    // Semana del 16 al 22/11/2026 (L-D). Jornada 8,25 h = 495 min.
+    repo.createEntry(entry({ date: '2026-11-16', minutes: 300 }));
+    repo.createEntry(entry({ date: '2026-11-16', minutes: 195, projectId: p2, workType: 'incidencia' }));
+    repo.createEntry(entry({ date: '2026-11-17', minutes: 240, projectId: p2, workType: 'mantenimiento' }));
+    repo.createEntry(entry({ date: '2026-11-18', minutes: 495, projectId: vac }));
+  });
+
+  it('calcula horas por proyecto, porcentajes, cobertura y días pendientes', () => {
+    const s = repo.stats({ dateFrom: '2026-11-16', dateTo: '2026-11-22' }, '2026-11-20');
+    expect(s.totalMinutes).toBe(1230);
+    expect(s.workMinutes).toBe(735);
+    expect(s.vacationMinutes).toBe(495);
+    expect(s.vacationDays).toBe(1);
+    expect(s.workingDays).toBe(5);
+    expect(s.expectedMinutes).toBe(2475);
+    // cubiertos: 495 + 240 + 495 = 1230 de 2475
+    expect(s.coveragePercent).toBe(49.7);
+    const portal = s.byProject.find((p) => p.code === 'P-001')!;
+    expect(portal.minutes).toBe(300);
+    expect(portal.percent).toBe(40.82); // 300 / 735 (sin ausencias)
+    expect(s.byProject.at(-1)!.kind).toBe('vacation'); // ausencias al final
+    expect(s.incompleteDays.map((d) => d.date)).toEqual(['2026-11-20', '2026-11-19', '2026-11-17']);
+    expect(s.incompleteDays[2].pendingMinutes).toBe(255);
+    expect(s.byDay).toHaveLength(5); // hasta «hoy» (20/11)
+    const past = repo.stats({ dateFrom: '2026-11-16', dateTo: '2026-11-22' }, '2026-11-30');
+    expect(past.byDay).toHaveLength(7);
+    expect(past.byDay.find((d) => d.date === '2026-11-22')!.workday).toBe(false);
+    expect(s.avgWorkMinutesPerDay).toBe(368); // 735 / 2 días con trabajo
+    expect(s.byWorkType.map((w) => w.workType)).toEqual(['desarrollo', 'incidencia', 'mantenimiento', 'ausencia']);
+  });
+
+  it('con filtro de proyecto no calcula cobertura engañosa', () => {
+    const s = repo.stats({ dateFrom: '2026-11-16', dateTo: '2026-11-22', projectId });
+    expect(s.totalMinutes).toBe(300);
+    expect(s.coveragePercent).toBeNull();
+    expect(s.incompleteDays).toHaveLength(0);
+    expect(s.expectedMinutes).toBe(2475);
+  });
+
+  it('sin datos devuelve ceros sin fallar', () => {
+    const s = repo.stats({ dateFrom: '2025-01-01', dateTo: '2025-01-31', userId });
+    expect(s.totalMinutes).toBe(0);
+    expect(s.incompleteDays.length).toBeGreaterThan(0);
+  });
+});
+
+describe('Migración v1 → v2', () => {
+  it('actualiza una base de datos antigua conservando los datos', async () => {
+    const { loadSqlJs, MIGRATIONS } = await import('../electron/db');
+    const SQL = await loadSqlJs();
+    const old = new SQL.Database();
+    old.exec(MIGRATIONS[0]);
+    old.exec('PRAGMA user_version = 1');
+    old.exec(`INSERT INTO users VALUES (1,'Ana','x','x'); INSERT INTO projects VALUES (1,'P','Proy',1,'x','x');
+      INSERT INTO time_entries VALUES (7,1,1,'2026-01-05',60,'desarrollo','antes','x','x');`);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gh-'));
+    const f = path.join(dir, 'v1.sqlite');
+    fs.writeFileSync(f, old.export());
+    const s = await Store.open(f);
+    const r = new Repo(s);
+    expect(r.history({}).rows[0]).toMatchObject({ id: 7, description: 'antes', projectKind: 'normal' });
+    expect(r.listProjects()[0].kind).toBe('normal');
+    expect(s.get<{ v: number }>('PRAGMA user_version')).toEqual({ user_version: 2 });
+  });
+});
+
+describe('Cobertura con periodos que incluyen días futuros', () => {
+  it('solo mide los días ya transcurridos', () => {
+    repo.createEntry(entry({ date: '2026-11-16', minutes: 495 }));
+    const s = repo.stats({ dateFrom: '2026-11-16', dateTo: '2026-11-30' }, '2026-11-16');
+    expect(s.workingDays).toBe(11);
+    expect(s.elapsedWorkingDays).toBe(1);
+    expect(s.coveragePercent).toBe(100);
+    expect(s.incompleteDays).toHaveLength(0);
+  });
+});
+
+describe('Correcciones de la revisión v1.1', () => {
+  it('«Repetir última tarea» ignora las ausencias', () => {
+    const vac = repo.createProject({ code: 'VAC', name: 'Vacaciones', kind: 'vacation' }).id;
+    const work = repo.createEntry(entry({ minutes: 60 }));
+    tick();
+    repo.createEntry(entry({ projectId: vac, minutes: 120, date: '2026-11-17' }));
+    expect(repo.lastEntry(userId)?.id).toBe(work.id);
+  });
+
+  it('avisa de los días en los que solo cabía parte de la ausencia', () => {
+    repo.createProject({ code: 'VAC', name: 'Vacaciones', kind: 'vacation' });
+    repo.createEntry(entry({ minutes: 360 }));
+    const r = repo.registerAbsence({ userId, kind: 'vacation', dateFrom: '2026-11-16', dateTo: '2026-11-17', minutesPerDay: 240 });
+    expect(r.truncated).toEqual(['2026-11-16']);
+    expect(repo.daySummary(userId, '2026-11-16').imputedMinutes).toBe(495);
+  });
+
+  it('la evolución diaria muestra los últimos 92 días hasta hoy', () => {
+    repo.createEntry(entry({ date: '2026-11-16' }));
+    const s = repo.stats({ dateFrom: '2026-01-01', dateTo: '2026-12-31' }, '2026-11-17');
+    expect(s.byDay).toHaveLength(92);
+    expect(s.byDay.at(-1)!.date).toBe('2026-11-17');
+    expect(s.byDayTruncated).toBe(true);
+  });
+
+  it('distingue cobertura no aplicable por filtros y por periodo futuro', () => {
+    expect(repo.stats({ dateFrom: '2026-11-16', dateTo: '2026-11-20', projectId }, '2026-11-20').coveragePartial).toBe(true);
+    const fut = repo.stats({ dateFrom: '2027-01-04', dateTo: '2027-01-08', userId }, '2026-11-17');
+    expect(fut.coveragePartial).toBe(false);
+    expect(fut.elapsedWorkingDays).toBe(0);
+    expect(fut.coveragePercent).toBeNull();
+  });
+
+  it('guarda una copia de la base de datos antes de migrar el esquema', async () => {
+    const { loadSqlJs, MIGRATIONS } = await import('../electron/db');
+    const SQL = await loadSqlJs();
+    const old = new SQL.Database();
+    old.exec(MIGRATIONS[0]);
+    old.exec('PRAGMA user_version = 1');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gh-'));
+    const f = path.join(dir, 'db.sqlite');
+    fs.writeFileSync(f, old.export());
+    await Store.open(f);
+    expect(fs.existsSync(`${f}.antes-v${MIGRATIONS.length}.bak`)).toBe(true);
   });
 });

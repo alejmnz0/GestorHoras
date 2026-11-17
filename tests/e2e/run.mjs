@@ -260,6 +260,84 @@ await step('Persistencia tras cerrar y volver a abrir la aplicación', async () 
   await main.screenshot({ path: path.join(shots, '07-tras-reinicio.png') });
 });
 
+await step('Proyecto especial de Vacaciones desde «Proyectos»', async () => {
+  await main.getByRole('button', { name: 'Proyectos' }).click();
+  await main.getByText('Proyecto especial de Vacaciones').waitFor();
+  await main.getByRole('button', { name: 'Configurar' }).first().click();
+  assert.equal(await main.getByPlaceholder('p. ej. Portal de clientes').inputValue(), 'Vacaciones');
+  await main.getByRole('button', { name: 'Crear proyecto' }).click();
+  await main.getByText(/Vacaciones \(VACACIONES\)/).waitFor();
+  await main.screenshot({ path: path.join(shots, '08-proyectos-especiales.png') });
+});
+
+await step('Registrar vacaciones en un rango (salta fines de semana)', async () => {
+  await main.getByRole('button', { name: 'Imputar horas', exact: true }).click();
+  await main.getByRole('button', { name: 'Registrar ausencia' }).click();
+  const dlg = main.getByRole('dialog', { name: 'Registrar ausencia' });
+  const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const start = new Date();
+  start.setDate(start.getDate() + ((8 - start.getDay()) % 7 || 7)); // próximo lunes
+  const end = new Date(start);
+  end.setDate(start.getDate() + 6); // domingo
+  await dlg.locator('input[type="date"]').nth(0).fill(iso(start));
+  await dlg.locator('input[type="date"]').nth(1).fill(iso(end));
+  await dlg.getByText('5 día(s) laborable(s)').waitFor();
+  await main.screenshot({ path: path.join(shots, '09-ausencia.png') });
+  await dlg.getByRole('button', { name: /Registrar 5 día/ }).click();
+  await main.getByText('Vacaciones registradas').waitFor();
+  const h = await main.evaluate(() => window.api.entries.history({ workType: 'ausencia' }));
+  assert.equal(h.rows.length, 5);
+  assert.ok(h.rows.every((r) => r.minutes === 495 && r.projectKind === 'vacation'));
+});
+
+await step('Duplicar una tarea, cambiar el proyecto y guardarla como nueva', async () => {
+  const before = (await main.evaluate(() => window.api.entries.history({}))).rows.length;
+  const item = main.locator('li', { hasText: 'Portal de clientes' }).first();
+  await item.hover();
+  await item.getByRole('button', { name: 'Duplicar como nueva' }).click();
+  await main.getByText('Copia de').waitFor();
+  await main.locator('select').nth(1).selectOption({ label: 'Integración SAP' });
+  await main.getByRole('button', { name: 'Guardar imputación' }).click();
+  await main.getByText('Imputación guardada').last().waitFor();
+  const after = await main.evaluate(() => window.api.entries.history({}));
+  assert.equal(after.rows.length, before + 1);
+  assert.equal(after.rows.filter((r) => r.projectName === 'Integración SAP').length, 2);
+  // «Repetir última tarea» copia la recién creada
+  await main.getByRole('button', { name: 'Repetir última tarea' }).click();
+  await main.getByText('Copia de').waitFor();
+  await main.getByRole('button', { name: 'Descartar' }).click();
+});
+
+await step('Estadísticas: horas por proyecto, % y cobertura', async () => {
+  await main.getByRole('button', { name: 'Histórico' }).click();
+  await main.getByRole('tab', { name: 'Estadísticas' }).click();
+  await main.getByText('Horas por proyecto').waitFor();
+  await main.getByText('Cobertura de la jornada').waitFor();
+  await main.getByText('Evolución diaria').waitFor();
+  await main.getByLabel('Periodo').selectOption('thisYear');
+  await main.getByText('Total trabajo').waitFor();
+  const st = await main.evaluate(() => window.api.entries.stats({ dateFrom: '2000-01-01', dateTo: '2100-01-01' }));
+  assert.ok(st.byProject.length >= 2);
+  assert.equal(st.vacationDays, 5);
+  await main.waitForTimeout(300);
+  await main.screenshot({ path: path.join(shots, '10-estadisticas.png'), fullPage: true });
+});
+
+await step('Modo noche y color de acento', async () => {
+  await main.getByRole('button', { name: 'Cambiar entre modo claro y modo noche' }).click();
+  await main.waitForFunction(() => document.documentElement.classList.contains('dark'));
+  const s = await main.evaluate(() => window.api.settings.get());
+  assert.equal(s.theme, 'dark');
+  await main.getByRole('button', { name: 'Configuración' }).click();
+  await main.getByRole('radio', { name: 'Violeta' }).click();
+  await main.waitForFunction(() => document.documentElement.dataset.accent === 'violet');
+  await main.waitForTimeout(300);
+  await main.screenshot({ path: path.join(shots, '11-modo-noche.png') });
+  await main.getByRole('button', { name: 'Imputar horas', exact: true }).click();
+  await main.waitForTimeout(300);
+  await main.screenshot({ path: path.join(shots, '12-modo-noche-imputar.png') });
+});
+
 await app.evaluate(({ app }) => app.quit());
 console.log(`\nE2E OK – ${results.length} pasos superados. Capturas en ${shots}`);
 process.exit(0);

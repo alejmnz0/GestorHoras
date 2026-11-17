@@ -1,17 +1,18 @@
 /**
  * Estructura principal: menú lateral, navegación entre secciones, primer uso y avisos.
  */
-import { CalendarClock, FolderKanban, History, Settings as SettingsIcon, UserRound } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { CalendarClock, FolderKanban, History, Moon, Settings as SettingsIcon, Sun, UserRound } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Settings, User } from '../shared/types';
 import { useToast } from './components/Toast';
 import { Button, Field, Modal, cx, inputClass } from './components/ui';
 import { api, errorMessage } from './lib/api';
 import { AppContext, type AppState } from './lib/appContext';
 import { playChime } from './lib/sound';
+import { applyTheme, watchSystemTheme } from './lib/theme';
 import { ConfiguracionPage } from './pages/Configuracion';
 import { HistoricoPage } from './pages/Historico';
-import { ImputarPage } from './pages/Imputar';
+import { ImputarPage, type ImputarPrefill } from './pages/Imputar';
 import { ProyectosPage } from './pages/Proyectos';
 
 type Page = 'imputar' | 'historico' | 'proyectos' | 'configuracion';
@@ -31,6 +32,11 @@ export function App() {
   const [dataVersion, setDataVersion] = useState(0);
   const [userDialog, setUserDialog] = useState<'first' | 'new' | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [prefill, setPrefill] = useState<ImputarPrefill | null>(null);
+  const goToImputar = (p: Omit<ImputarPrefill, 'nonce'>) => {
+    setPrefill({ ...p, nonce: Date.now() });
+    setPage('imputar');
+  };
 
   const reloadUsers = useCallback(async () => {
     const list = await api.users.list();
@@ -73,6 +79,14 @@ export function App() {
     return () => offs.forEach((off) => off());
   }, []);
 
+  // Tema y color de acento.
+  const settingsRef = useRef<Settings | null>(null);
+  settingsRef.current = settings;
+  useEffect(() => {
+    if (settings) applyTheme(settings);
+  }, [settings]);
+  useEffect(() => watchSystemTheme(() => settingsRef.current), []);
+
   // Tras importar una copia de seguridad el usuario actual puede no existir.
   useEffect(() => {
     if (settings && users.length && settings.currentUserId && !users.some((u) => u.id === settings.currentUserId)) {
@@ -104,6 +118,9 @@ export function App() {
 
   const state: AppState = { settings, users, dataVersion, updateSettings, reloadUsers };
   const currentUser = users.find((u) => u.id === settings.currentUserId);
+  const isDark =
+    settings.theme === 'dark' ||
+    (settings.theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
 
   return (
     <AppContext.Provider value={state}>
@@ -111,17 +128,29 @@ export function App() {
         <aside className="flex w-60 shrink-0 flex-col border-r border-slate-200/80 bg-white">
           <div className="flex items-center gap-2.5 px-5 pt-5 pb-6">
             <img src="./icon.png" alt="" className="size-8 rounded-lg" />
-            <div>
+            <div className="min-w-0 flex-1">
               <p className="text-sm leading-tight font-semibold text-slate-900">Gestor de Horas</p>
-              <p className="text-xs text-slate-400">Imputación de tiempo</p>
+              <p className="truncate text-xs text-slate-400">Registro de horas</p>
             </div>
+            <button
+              type="button"
+              title={isDark ? 'Cambiar a modo claro' : 'Cambiar a modo noche'}
+              aria-label="Cambiar entre modo claro y modo noche"
+              onClick={() => void updateSettings({ theme: isDark ? 'light' : 'dark' })}
+              className="flex size-8 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+            >
+              {isDark ? <Sun className="size-4" /> : <Moon className="size-4" />}
+            </button>
           </div>
           <nav className="flex-1 space-y-0.5 px-3">
             {NAV.map(({ id, label, icon: Icon }) => (
               <button
                 key={id}
                 type="button"
-                onClick={() => setPage(id)}
+                onClick={() => {
+                  setPrefill(null);
+                  setPage(id);
+                }}
                 aria-current={page === id ? 'page' : undefined}
                 className={cx(
                   'flex h-9 w-full items-center gap-2.5 rounded-lg px-3 text-sm font-medium transition-colors',
@@ -139,7 +168,7 @@ export function App() {
             className="m-3 flex items-center gap-2.5 rounded-lg border border-slate-200 px-3 py-2.5 text-left transition hover:bg-slate-50"
             title="Cambiar usuario en Configuración"
           >
-            <div className="flex size-8 items-center justify-center rounded-full bg-brand-600 text-sm font-semibold text-white">
+            <div className="flex size-8 items-center justify-center rounded-full bg-brand-600 text-sm font-semibold text-on-accent">
               {currentUser ? currentUser.name.charAt(0).toUpperCase() : <UserRound className="size-4" />}
             </div>
             <div className="min-w-0">
@@ -151,8 +180,19 @@ export function App() {
 
         <main className="min-w-0 flex-1 overflow-y-auto">
           <div className={cx('mx-auto h-full px-8 py-7', page === 'historico' ? 'max-w-none' : 'max-w-[1200px]')}>
-            {page === 'imputar' && <ImputarPage onAddUser={() => setUserDialog('new')} />}
-            {page === 'historico' && <HistoricoPage />}
+            {page === 'imputar' && (
+              <ImputarPage
+                onAddUser={() => setUserDialog('new')}
+                prefill={prefill}
+                onGoToProjects={() => setPage('proyectos')}
+              />
+            )}
+            {page === 'historico' && (
+              <HistoricoPage
+                onDuplicate={(entry) => goToImputar({ copyOf: entry })}
+                onOpenDay={(date, userId) => goToImputar({ date, userId })}
+              />
+            )}
             {page === 'proyectos' && <ProyectosPage />}
             {page === 'configuracion' && <ConfiguracionPage onAddUser={() => setUserDialog('new')} />}
           </div>

@@ -4,8 +4,8 @@
  */
 import { FolderKanban, Pencil, Plus, Power, PowerOff, Search, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { PROJECT_CODE_MAX_LENGTH, PROJECT_NAME_MAX_LENGTH } from '../../shared/rules';
-import type { Project } from '../../shared/types';
+import { PROJECT_CODE_MAX_LENGTH, PROJECT_KINDS, PROJECT_NAME_MAX_LENGTH } from '../../shared/rules';
+import type { AbsenceKind, Project, ProjectKind } from '../../shared/types';
 import { useToast } from '../components/Toast';
 import {
   Badge,
@@ -32,7 +32,7 @@ export function ProyectosPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<StatusFilter>('all');
-  const [editing, setEditing] = useState<Project | 'new' | null>(null);
+  const [editing, setEditing] = useState<Project | { newKind: ProjectKind } | null>(null);
   const [toDelete, setToDelete] = useState<Project | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -78,10 +78,16 @@ export function ProyectosPage() {
         title="Proyectos"
         subtitle="Solo los proyectos activos aparecen al imputar horas."
         actions={
-          <Button variant="primary" icon={<Plus className="size-4" />} onClick={() => setEditing('new')}>
+          <Button variant="primary" icon={<Plus className="size-4" />} onClick={() => setEditing({ newKind: 'normal' })}>
             Nuevo proyecto
           </Button>
         }
+      />
+
+      <SpecialProjects
+        projects={projects}
+        onConfigure={(kind) => setEditing({ newKind: kind })}
+        onEdit={(p) => setEditing(p)}
       />
 
       <div className="mb-4 flex items-center gap-3">
@@ -132,7 +138,14 @@ export function ProyectosPage() {
             {shown.map((p) => (
               <tr key={p.id} className="group border-b border-slate-100 last:border-0 hover:bg-slate-50/60">
                 <td className="px-4 py-2.5 font-mono text-xs text-slate-600">{p.code}</td>
-                <td className={cx('px-4 py-2.5 font-medium', p.active ? 'text-slate-800' : 'text-slate-400')}>{p.name}</td>
+                <td className={cx('px-4 py-2.5 font-medium', p.active ? 'text-slate-800' : 'text-slate-400')}>
+                  {p.name}
+                  {p.kind !== 'normal' && (
+                    <Badge tone="green" className="ml-2">
+                      {PROJECT_KINDS.find((k) => k.value === p.kind)?.emoji} {PROJECT_KINDS.find((k) => k.value === p.kind)?.label}
+                    </Badge>
+                  )}
+                </td>
                 <td className="px-4 py-2.5">
                   <Badge tone={p.active ? 'green' : 'slate'}>{p.active ? 'Activo' : 'Inactivo'}</Badge>
                 </td>
@@ -189,26 +202,80 @@ export function ProyectosPage() {
   );
 }
 
-function ProjectModal({ project, onClose }: { project: Project | 'new' | null; onClose: () => void }) {
+/** Tarjeta con los proyectos especiales (vacaciones y baja) y acceso rápido para configurarlos. */
+function SpecialProjects({
+  projects,
+  onConfigure,
+  onEdit,
+}: {
+  projects: Project[];
+  onConfigure: (kind: AbsenceKind) => void;
+  onEdit: (p: Project) => void;
+}) {
+  return (
+    <div className="mb-5 grid grid-cols-2 gap-3">
+      {PROJECT_KINDS.filter((k) => k.value !== 'normal').map((k) => {
+        const p = projects.find((x) => x.kind === k.value);
+        return (
+          <Card key={k.value} className="flex items-center gap-3 p-4">
+            <span className="flex size-10 items-center justify-center rounded-xl bg-emerald-50 text-xl">{k.emoji}</span>
+            <div className="min-w-0 flex-1">
+              <p className="text-[13px] font-semibold text-slate-800">Proyecto especial de {k.label}</p>
+              <p className="truncate text-xs text-slate-500">
+                {p
+                  ? `${p.name} (${p.code}) · ${p.entryCount} imputación(es)${p.active ? '' : ' · inactivo'}`
+                  : k.value === 'vacation'
+                    ? 'Sin configurar: necesario para registrar vacaciones.'
+                    : 'Sin configurar: necesario para registrar bajas laborales.'}
+              </p>
+            </div>
+            {p ? (
+              <Button size="sm" onClick={() => onEdit(p)}>
+                Editar
+              </Button>
+            ) : (
+              <Button size="sm" variant="subtle" icon={<Plus className="size-3.5" />} onClick={() => onConfigure(k.value as AbsenceKind)}>
+                Configurar
+              </Button>
+            )}
+          </Card>
+        );
+      })}
+    </div>
+  );
+}
+
+function ProjectModal({
+  project,
+  onClose,
+}: {
+  project: Project | { newKind: ProjectKind } | null;
+  onClose: () => void;
+}) {
   const toast = useToast();
   const [code, setCode] = useState('');
   const [name, setName] = useState('');
   const [active, setActive] = useState(true);
+  const [kind, setKind] = useState<ProjectKind>('normal');
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const isNew = project === 'new';
+  const isNew = !!project && 'newKind' in project;
+  const locked = !!project && !isNew && (project as Project).entryCount > 0;
 
   useEffect(() => {
     if (!project) return;
     setError(null);
-    if (project === 'new') {
-      setCode('');
-      setName('');
+    if ('newKind' in project) {
+      const k = project.newKind;
+      setKind(k);
+      setCode(k === 'vacation' ? 'VACACIONES' : k === 'sick_leave' ? 'BAJA' : '');
+      setName(k === 'vacation' ? 'Vacaciones' : k === 'sick_leave' ? 'Baja laboral' : '');
       setActive(true);
     } else {
       setCode(project.code);
       setName(project.name);
       setActive(project.active);
+      setKind(project.kind);
     }
   }, [project]);
 
@@ -217,8 +284,8 @@ function ProjectModal({ project, onClose }: { project: Project | 'new' | null; o
     setSaving(true);
     setError(null);
     try {
-      if (isNew) await api.projects.create({ code, name, active });
-      else if (project) await api.projects.update(project.id, { code, name, active });
+      if (isNew) await api.projects.create({ code, name, active, kind });
+      else if (project && 'id' in project) await api.projects.update(project.id, { code, name, active, kind });
       toast.success(isNew ? 'Proyecto creado' : 'Proyecto actualizado', name.trim());
       onClose();
     } catch (err) {
@@ -261,6 +328,30 @@ function ProjectModal({ project, onClose }: { project: Project | 'new' | null; o
             onChange={(e) => setName(e.target.value)}
             placeholder="p. ej. Portal de clientes"
           />
+        </Field>
+        <Field label="Tipo de proyecto" group hint={locked ? 'No se puede cambiar: ya tiene imputaciones' : undefined}>
+          <div className="grid grid-cols-3 gap-1 rounded-xl bg-slate-100 p-1">
+            {PROJECT_KINDS.map((k) => (
+              <button
+                key={k.value}
+                type="button"
+                disabled={locked}
+                aria-pressed={kind === k.value}
+                onClick={() => setKind(k.value)}
+                className={cx(
+                  'h-8 rounded-lg text-[13px] font-medium transition disabled:cursor-not-allowed',
+                  kind === k.value ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200' : 'text-slate-500 hover:text-slate-800',
+                )}
+              >
+                {k.emoji} {k.label}
+              </button>
+            ))}
+          </div>
+          {kind !== 'normal' && (
+            <p className="mt-1.5 text-xs text-slate-500">
+              Las imputaciones a este proyecto cuentan como ausencia y completan la jornada. Solo puede haber uno.
+            </p>
+          )}
         </Field>
         <div className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2.5">
           <div>

@@ -7,6 +7,7 @@ import {
   DESCRIPTION_MAX_LENGTH,
   SLOT_MINUTES,
   WORK_TYPES,
+  PROJECT_KINDS,
   addDays,
   checkDailyLimit,
   formatHours,
@@ -67,16 +68,20 @@ export function EntryForm({
   };
 
   // Si el valor supera lo disponible (p. ej. al cambiar de día) se ajusta automáticamente.
+  // (también al copiar una tarea más larga que lo que queda del día).
   useEffect(() => {
     if (available >= SLOT_MINUTES && values.minutes > available) onChange({ ...values, minutes: available });
-  }, [available]);
+  }, [available, values.minutes]);
 
   const problems = useMemo(() => {
     const p: Partial<Record<keyof EntryFormValues, string>> = {};
     if (!values.userId) p.userId = 'Selecciona el usuario.';
     if (!isValidIsoDate(values.date)) p.date = 'Fecha no válida.';
     if (!values.projectId) p.projectId = 'Selecciona un proyecto.';
-    if (!values.workType) p.workType = 'Selecciona el tipo de trabajo.';
+    const proj = projects.find((x) => x.id === values.projectId);
+    if ((!values.workType || values.workType === 'ausencia') && (!proj || proj.kind === 'normal')) {
+      p.workType = 'Selecciona el tipo de trabajo.';
+    }
     try {
       validateEntryMinutes(values.minutes);
       checkDailyLimit(usedMinutes, values.minutes, maxMinutes);
@@ -89,9 +94,14 @@ export function EntryForm({
       p.description = (e as Error).message;
     }
     return p;
-  }, [values, usedMinutes, maxMinutes]);
+  }, [values, usedMinutes, maxMinutes, projects]);
 
   const dayFull = available < SLOT_MINUTES;
+  const selectedProject = projects.find((p) => p.id === values.projectId);
+  const isAbsence = !!selectedProject && selectedProject.kind !== 'normal';
+  const absenceInfo = PROJECT_KINDS.find((k) => k.value === selectedProject?.kind);
+  const workProjects = projects.filter((p) => p.kind === 'normal');
+  const absenceProjects = projects.filter((p) => p.kind !== 'normal');
 
   async function submit(e?: React.FormEvent) {
     e?.preventDefault();
@@ -110,7 +120,7 @@ export function EntryForm({
         projectId: values.projectId!,
         date: values.date,
         minutes: values.minutes,
-        workType: values.workType!,
+        workType: isAbsence ? 'ausencia' : values.workType!,
         description: values.description,
       });
       setTouched(false);
@@ -213,15 +223,33 @@ export function EntryForm({
           <option value="" disabled>
             {projects.length ? 'Selecciona un proyecto…' : 'No hay proyectos activos (créalos en «Proyectos»)'}
           </option>
-          {projects.map((p) => (
+          {workProjects.map((p) => (
             <option key={p.id} value={p.id}>
               {p.name}
               {!p.active ? ' (inactivo)' : ''}
             </option>
           ))}
+          {absenceProjects.length > 0 && (
+            <optgroup label="Ausencias">
+              {absenceProjects.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {PROJECT_KINDS.find((k) => k.value === p.kind)?.emoji} {p.name}
+                  {!p.active ? ' (inactivo)' : ''}
+                </option>
+              ))}
+            </optgroup>
+          )}
         </select>
       </Field>
 
+      {isAbsence ? (
+        <div className="flex items-center gap-2.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-3 text-[13px] text-emerald-700">
+          <span className="text-lg leading-none">{absenceInfo?.emoji}</span>
+          <span>
+            Se registrará como <b>ausencia por {absenceInfo?.label.toLowerCase()}</b>. No hace falta elegir tipo de trabajo.
+          </span>
+        </div>
+      ) : (
       <Field label="Tipo de trabajo" group required error={show('workType')}>
         <div className="grid grid-cols-3 gap-1 rounded-xl bg-slate-100 p-1">
           {WORK_TYPES.map((w) => (
@@ -242,6 +270,7 @@ export function EntryForm({
           ))}
         </div>
       </Field>
+      )}
 
       <Field
         label="Descripción"

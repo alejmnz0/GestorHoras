@@ -24,7 +24,7 @@ export function EditEntryModal({ entry, onClose }: { entry: TimeEntry | null; on
       date: entry.date,
       minutes: entry.minutes,
       projectId: entry.projectId,
-      workType: entry.workType,
+      workType: entry.workType === 'ausencia' ? null : entry.workType,
       description: entry.description,
     });
     api.projects.list({ includeInactive: true }).then((all) =>

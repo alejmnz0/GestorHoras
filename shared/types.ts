@@ -3,7 +3,14 @@
  * Las horas se manejan SIEMPRE como minutos enteros para evitar errores de precisión.
  */
 
-export type WorkType = 'incidencia' | 'desarrollo' | 'mantenimiento';
+export type WorkType = 'incidencia' | 'desarrollo' | 'mantenimiento' | 'ausencia';
+
+/** normal: proyecto de trabajo. vacation / sick_leave: proyectos especiales de ausencia (uno de cada). */
+export type ProjectKind = 'normal' | 'vacation' | 'sick_leave';
+export type AbsenceKind = Exclude<ProjectKind, 'normal'>;
+
+export type Theme = 'system' | 'light' | 'dark';
+export type Accent = 'blue' | 'violet' | 'green' | 'orange' | 'rose';
 
 export interface User {
   id: number;
@@ -17,6 +24,7 @@ export interface Project {
   code: string;
   name: string;
   active: boolean;
+  kind: ProjectKind;
   /** Número de imputaciones asociadas (para saber si se puede eliminar). */
   entryCount: number;
   createdAt: string;
@@ -27,6 +35,7 @@ export interface ProjectInput {
   code: string;
   name: string;
   active?: boolean;
+  kind?: ProjectKind;
 }
 
 export interface TimeEntry {
@@ -37,6 +46,7 @@ export interface TimeEntry {
   projectCode: string;
   projectName: string;
   projectActive: boolean;
+  projectKind: ProjectKind;
   /** Fecha en formato ISO YYYY-MM-DD */
   date: string;
   minutes: number;
@@ -82,6 +92,11 @@ export interface DaySummary {
   /** Porcentaje 0-100 con dos decimales */
   percent: number;
   complete: boolean;
+  /** Día laborable según la configuración (L-V por defecto). */
+  workday: boolean;
+  /** Minutos imputados a vacaciones / baja ese día. */
+  vacationMinutes: number;
+  sickMinutes: number;
 }
 
 export interface DayData {
@@ -107,6 +122,72 @@ export interface Settings {
   floatingY: number | null;
   autoStart: boolean;
   minimizeToTray: boolean;
+  theme: Theme;
+  accent: Accent;
+  /** Días laborables: 0 = domingo … 6 = sábado. */
+  workDays: number[];
+}
+
+export interface AbsenceInput {
+  userId: number;
+  kind: AbsenceKind;
+  dateFrom: string;
+  dateTo: string;
+  /** Minutos por día, o null para completar lo pendiente de cada día. */
+  minutesPerDay: number | null;
+  description?: string;
+}
+
+export interface AbsenceResult {
+  /** Días en los que se ha registrado la ausencia. */
+  dates: string[];
+  /** Días laborables omitidos porque ya estaban completos. */
+  skippedFull: string[];
+  /** Días no laborables omitidos (fines de semana, etc.). */
+  skippedNonWorking: number;
+  /** Días en los que solo cabía una parte de lo pedido. */
+  truncated: string[];
+}
+
+export interface ProjectStat {
+  projectId: number;
+  code: string;
+  name: string;
+  kind: ProjectKind;
+  active: boolean;
+  minutes: number;
+  /** % sobre las horas de trabajo (sin ausencias); para ausencias, sobre el total. */
+  percent: number;
+  entries: number;
+}
+
+export interface StatsResult {
+  dateFrom: string | null;
+  dateTo: string | null;
+  /** Usuario para el que se calculan jornada esperada y días pendientes (null si hay varios). */
+  userId: number | null;
+  totalMinutes: number;
+  workMinutes: number;
+  vacationMinutes: number;
+  sickMinutes: number;
+  entryCount: number;
+  daysWithEntries: number;
+  avgWorkMinutesPerDay: number;
+  vacationDays: number;
+  sickDays: number;
+  workingDays: number | null;
+  expectedMinutes: number | null;
+  /** % de la jornada cubierta en los días laborables ya transcurridos del periodo. */
+  coveragePercent: number | null;
+  elapsedWorkingDays: number | null;
+  /** true si hay filtros de proyecto/tipo/búsqueda (la cobertura no aplica). */
+  coveragePartial: boolean;
+  /** true si la evolución diaria muestra solo los últimos 92 días del periodo. */
+  byDayTruncated: boolean;
+  incompleteDays: { date: string; imputedMinutes: number; pendingMinutes: number }[];
+  byProject: ProjectStat[];
+  byWorkType: { workType: WorkType; minutes: number; percent: number }[];
+  byDay: { date: string; minutes: number; workday: boolean }[];
 }
 
 export interface ReminderStatus {

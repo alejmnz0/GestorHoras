@@ -62,12 +62,38 @@ export const MIGRATIONS: string[] = [
     updated_at  TEXT    NOT NULL
   );
   `,
+  // v2: proyectos especiales (vacaciones / baja) y tipo de trabajo "ausencia".
+  //     SQLite no permite cambiar un CHECK, así que time_entries se reconstruye conservando los datos.
+  `
+  ALTER TABLE projects ADD COLUMN kind TEXT NOT NULL DEFAULT 'normal'
+    CHECK (kind IN ('normal', 'vacation', 'sick_leave'));
+  CREATE UNIQUE INDEX idx_projects_special_kind ON projects(kind) WHERE kind <> 'normal';
+
+  CREATE TABLE time_entries_v2 (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    project_id  INTEGER NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+    date        TEXT    NOT NULL CHECK (date GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]'),
+    minutes     INTEGER NOT NULL CHECK (minutes >= 15 AND minutes % 15 = 0 AND minutes <= 1440),
+    work_type   TEXT    NOT NULL CHECK (work_type IN ('incidencia', 'desarrollo', 'mantenimiento', 'ausencia')),
+    description TEXT    NOT NULL DEFAULT '' CHECK (length(description) <= 500),
+    created_at  TEXT    NOT NULL,
+    updated_at  TEXT    NOT NULL
+  );
+  INSERT INTO time_entries_v2 (id, user_id, project_id, date, minutes, work_type, description, created_at, updated_at)
+    SELECT id, user_id, project_id, date, minutes, work_type, description, created_at, updated_at FROM time_entries;
+  DROP TABLE time_entries;
+  ALTER TABLE time_entries_v2 RENAME TO time_entries;
+  CREATE INDEX idx_entries_user_date ON time_entries(user_id, date);
+  CREATE INDEX idx_entries_date      ON time_entries(date);
+  CREATE INDEX idx_entries_project   ON time_entries(project_id);
+  `,
 ];
 
 export const REQUIRED_TABLES = ['users', 'projects', 'time_entries', 'settings'];
 const REQUIRED_COLUMNS: Record<string, string[]> = {
   users: ['id', 'name', 'created_at', 'updated_at'],
-  projects: ['id', 'code', 'name', 'active', 'created_at', 'updated_at'],
+  projects: ['id', 'code', 'name', 'active', 'kind', 'created_at', 'updated_at'],
   time_entries: ['id', 'user_id', 'project_id', 'date', 'minutes', 'work_type', 'description', 'created_at', 'updated_at'],
   settings: ['id', 'key', 'value', 'updated_at'],
 };
@@ -86,6 +112,11 @@ export class Store {
     let db: Database;
     if (filePath && fs.existsSync(filePath)) {
       db = new SQL.Database(fs.readFileSync(filePath));
+      // Antes de actualizar el esquema se guarda una copia del fichero tal cual estaba.
+      const version = Number(db.exec('PRAGMA user_version')[0]?.values[0]?.[0] ?? 0);
+      if (version > 0 && version < MIGRATIONS.length) {
+        fs.copyFileSync(filePath, `${filePath}.antes-v${MIGRATIONS.length}.bak`);
+      }
     } else {
       db = new SQL.Database();
     }

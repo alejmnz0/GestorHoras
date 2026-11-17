@@ -6,8 +6,14 @@ import type { Store } from './db';
 import {
   DEFAULT_SETTINGS,
   ValidationError,
+  SLOT_MINUTES,
+  addDays,
   checkDailyLimit,
+  dateRange,
   isValidIsoDate,
+  isWorkday,
+  projectKindLabel,
+  todayIso,
   isWorkType,
   percentOf,
   validateDescription,
@@ -18,6 +24,11 @@ import {
   validateUserName,
 } from '../shared/rules';
 import type {
+  AbsenceInput,
+  AbsenceResult,
+  ProjectKind,
+  StatsResult,
+  WorkType,
   DayData,
   DaySummary,
   EntryInput,
@@ -117,16 +128,15 @@ export class Repo {
     const code = validateProjectCode(input?.code);
     const name = validateProjectName(input?.name);
     const active = input.active === undefined ? true : !!input.active;
+    const kind = validateKind(input.kind);
     return this.store.transaction(() => {
       this.assertCodeFree(code, null);
+      this.assertKindFree(kind, null);
       const t = this.ts();
-      this.store.run('INSERT INTO projects (code, name, active, created_at, updated_at) VALUES (?, ?, ?, ?, ?)', [
-        code,
-        name,
-        active ? 1 : 0,
-        t,
-        t,
-      ]);
+      this.store.run(
+        'INSERT INTO projects (code, name, active, kind, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+        [code, name, active ? 1 : 0, kind, t, t],
+      );
       return this.getProject(this.store.lastInsertId())!;
     });
   }
@@ -139,10 +149,20 @@ export class Repo {
       if (!current) throw new ValidationError('El proyecto no existe.');
       this.assertCodeFree(code, id);
       const active = input.active === undefined ? current.active : !!input.active;
-      this.store.run('UPDATE projects SET code = ?, name = ?, active = ?, updated_at = ? WHERE id = ?', [
+      const kind = input.kind === undefined ? current.kind : validateKind(input.kind);
+      if (kind !== current.kind) {
+        if (current.entryCount > 0) {
+          throw new ValidationError(
+            'No se puede cambiar el tipo de un proyecto que ya tiene imputaciones. Crea un proyecto nuevo para ese uso.',
+          );
+        }
+        this.assertKindFree(kind, id);
+      }
+      this.store.run('UPDATE projects SET code = ?, name = ?, active = ?, kind = ?, updated_at = ? WHERE id = ?', [
         code,
         name,
         active ? 1 : 0,
+        kind,
         this.ts(),
         id,
       ]);
@@ -172,6 +192,21 @@ export class Repo {
     });
   }
 
+  /** Solo puede haber un proyecto de vacaciones y uno de baja. */
+  private assertKindFree(kind: ProjectKind, exceptId: number | null) {
+    if (kind === 'normal') return;
+    const r = this.store.get<Row>('SELECT name FROM projects WHERE kind = ? AND id IS NOT ?', [kind, exceptId]);
+    if (r) {
+      throw new ValidationError(`Ya existe un proyecto de ${projectKindLabel(kind)}: "${r.name}". Solo puede haber uno.`);
+    }
+  }
+
+  /** Proyecto especial (vacaciones / baja) si está configurado. */
+  specialProject(kind: Exclude<ProjectKind, 'normal'>): Project | undefined {
+    const r = this.store.get<{ id: number }>('SELECT id FROM projects WHERE kind = ?', [kind]);
+    return r ? this.getProject(Number(r.id)) : undefined;
+  }
+
   private assertCodeFree(code: string, exceptId: number | null) {
     const r = this.store.get<Row>('SELECT id, name FROM projects WHERE code = ? COLLATE NOCASE AND id IS NOT ?', [
       code,
@@ -193,9 +228,19 @@ export class Repo {
   }
 
   daySummary(userId: number, date: string): DaySummary {
-    const maxMinutes = this.getSettings().maxDailyMinutes;
+    const settings = this.getSettings();
+    const maxMinutes = settings.maxDailyMinutes;
     const imputedMinutes = this.dayMinutes(userId, date);
+    const abs = this.store.get<{ v: number; s: number }>(
+      `SELECT COALESCE(SUM(CASE WHEN p.kind = 'vacation' THEN e.minutes END), 0) AS v,
+              COALESCE(SUM(CASE WHEN p.kind = 'sick_leave' THEN e.minutes END), 0) AS s
+       FROM time_entries e JOIN projects p ON p.id = e.project_id WHERE e.user_id = ? AND e.date = ?`,
+      [userId, date],
+    );
     return {
+      workday: isWorkday(date, settings.workDays),
+      vacationMinutes: Number(abs?.v ?? 0),
+      sickMinutes: Number(abs?.s ?? 0),
       date,
       userId,
       maxMinutes,
@@ -226,8 +271,15 @@ export class Repo {
     if (!Number.isInteger(input.projectId)) throw new ValidationError('Selecciona un proyecto.');
     const project = this.getProject(input.projectId);
     if (!project) throw new ValidationError('El proyecto seleccionado no existe.');
-    if (!isWorkType(input.workType)) {
-      throw new ValidationError('Selecciona el tipo de trabajo (Incidencia, Desarrollo o Mantenimiento).');
+    // Vacaciones y baja siempre se registran como "ausencia"; los proyectos normales no admiten ese tipo.
+    let workType: WorkType;
+    if (project.kind !== 'normal') {
+      workType = 'ausencia';
+    } else {
+      if (!isWorkType(input.workType) || input.workType === 'ausencia') {
+        throw new ValidationError('Selecciona el tipo de trabajo (Incidencia, Desarrollo o Mantenimiento).');
+      }
+      workType = input.workType;
     }
     const description = validateDescription(input.description);
 
@@ -248,19 +300,19 @@ export class Repo {
       !!previous && previous.userId === input.userId && previous.date === input.date && minutes <= previous.minutes;
     if (!notIncreasing) checkDailyLimit(this.dayMinutes(input.userId, input.date, editingId), minutes, max);
 
-    return { minutes, description };
+    return { minutes, description, workType };
   }
 
   createEntry(input: EntryInput): TimeEntry {
     return this.store.transaction(() => {
-      const { minutes, description } = this.validateEntryInput(input, null);
+      const { minutes, description, workType } = this.validateEntryInput(input, null);
       const nowDate = this.now();
       const since = new Date(nowDate.getTime() - DUPLICATE_WINDOW_MS).toISOString();
       const dup = this.store.get(
         `SELECT id FROM time_entries
          WHERE user_id = ? AND project_id = ? AND date = ? AND minutes = ? AND work_type = ?
            AND description = ? AND created_at >= ?`,
-        [input.userId, input.projectId, input.date, minutes, input.workType, description, since],
+        [input.userId, input.projectId, input.date, minutes, workType, description, since],
       );
       if (dup) {
         throw new ValidationError(
@@ -271,7 +323,7 @@ export class Repo {
       this.store.run(
         `INSERT INTO time_entries (user_id, project_id, date, minutes, work_type, description, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [input.userId, input.projectId, input.date, minutes, input.workType, description, t, t],
+        [input.userId, input.projectId, input.date, minutes, workType, description, t, t],
       );
       return this.getEntry(this.store.lastInsertId())!;
     });
@@ -280,14 +332,210 @@ export class Repo {
   updateEntry(id: number, input: EntryInput): TimeEntry {
     return this.store.transaction(() => {
       if (!this.getEntry(id)) throw new ValidationError('La imputación ya no existe.');
-      const { minutes, description } = this.validateEntryInput(input, id);
+      const { minutes, description, workType } = this.validateEntryInput(input, id);
       this.store.run(
         `UPDATE time_entries SET user_id = ?, project_id = ?, date = ?, minutes = ?, work_type = ?,
                 description = ?, updated_at = ? WHERE id = ?`,
-        [input.userId, input.projectId, input.date, minutes, input.workType, description, this.ts(), id],
+        [input.userId, input.projectId, input.date, minutes, workType, description, this.ts(), id],
       );
       return this.getEntry(id)!;
     });
+  }
+
+  /** Última imputación del usuario (para «Repetir última tarea»). */
+  lastEntry(userId: number): TimeEntry | null {
+    // Se ignoran las ausencias: lo útil es repetir la última tarea de trabajo.
+    return (
+      this.queryEntries("WHERE e.user_id = ? AND p.kind = 'normal'", [userId], 'e.created_at DESC, e.id DESC LIMIT 1')[0] ??
+      null
+    );
+  }
+
+  /**
+   * Registra vacaciones o baja en un rango de fechas, solo en días laborables.
+   * Cada día recibe lo indicado o, si no se indica, lo que le falte para completar la jornada.
+   */
+  registerAbsence(input: AbsenceInput): AbsenceResult {
+    if (!input || (input.kind !== 'vacation' && input.kind !== 'sick_leave')) {
+      throw new ValidationError('Tipo de ausencia no válido.');
+    }
+    if (!Number.isInteger(input.userId) || !this.getUser(input.userId)) throw new ValidationError('Usuario no válido.');
+    if (!isValidIsoDate(input.dateFrom) || !isValidIsoDate(input.dateTo)) {
+      throw new ValidationError('Indica unas fechas válidas.');
+    }
+    if (input.dateTo < input.dateFrom) throw new ValidationError('La fecha final es anterior a la inicial.');
+    const days = dateRange(input.dateFrom, input.dateTo, 367);
+    if (days.at(-1) !== input.dateTo) throw new ValidationError('El periodo no puede superar un año.');
+    if (input.minutesPerDay !== null) validateEntryMinutes(input.minutesPerDay);
+    const description = validateDescription(input.description);
+    const project = this.specialProject(input.kind);
+    const label = projectKindLabel(input.kind);
+    if (!project) {
+      throw new ValidationError(`Primero configura el proyecto especial de ${label} en la sección «Proyectos».`);
+    }
+    if (!project.active) throw new ValidationError(`El proyecto de ${label} "${project.name}" está inactivo.`);
+
+    const { maxDailyMinutes, workDays } = this.getSettings();
+    const result: AbsenceResult = { dates: [], skippedFull: [], skippedNonWorking: 0, truncated: [] };
+    return this.store.transaction(() => {
+      const t = this.ts();
+      for (const date of days) {
+        if (!isWorkday(date, workDays)) {
+          result.skippedNonWorking++;
+          continue;
+        }
+        const pending = maxDailyMinutes - this.dayMinutes(input.userId, date);
+        const minutes = input.minutesPerDay === null ? pending : Math.min(input.minutesPerDay, pending);
+        if (minutes < SLOT_MINUTES) {
+          result.skippedFull.push(date);
+          continue;
+        }
+        if (input.minutesPerDay !== null && minutes < input.minutesPerDay) result.truncated.push(date);
+        this.store.run(
+          `INSERT INTO time_entries (user_id, project_id, date, minutes, work_type, description, created_at, updated_at)
+           VALUES (?, ?, ?, ?, 'ausencia', ?, ?, ?)`,
+          [input.userId, project.id, date, minutes - (minutes % SLOT_MINUTES), description, t, t],
+        );
+        result.dates.push(date);
+      }
+      if (result.dates.length === 0) {
+        throw new ValidationError(
+          result.skippedFull.length
+            ? 'Todos los días laborables del periodo ya tienen la jornada completa.'
+            : 'El periodo no contiene días laborables.',
+        );
+      }
+      return result;
+    });
+  }
+
+  /**
+   * Estadísticas sobre el mismo filtro del histórico.
+   * La jornada esperada y los días pendientes se calculan para un único usuario.
+   */
+  stats(filter: HistoryFilter = {}, today: string = todayIso()): StatsResult {
+    const { rows } = this.history({ ...filter, sortBy: 'date', sortDir: 'asc' });
+    const settings = this.getSettings();
+    const isAbs = (k: ProjectKind) => k !== 'normal';
+    const totalMinutes = rows.reduce((s, r) => s + r.minutes, 0);
+    const vacationMinutes = rows.filter((r) => r.projectKind === 'vacation').reduce((s, r) => s + r.minutes, 0);
+    const sickMinutes = rows.filter((r) => r.projectKind === 'sick_leave').reduce((s, r) => s + r.minutes, 0);
+    const workMinutes = totalMinutes - vacationMinutes - sickMinutes;
+
+    const dateFrom = filter.dateFrom || rows[0]?.date || null;
+    const dateTo = filter.dateTo || rows.at(-1)?.date || null;
+    const users = new Set(rows.map((r) => r.userId));
+    const userId = filter.userId ?? (users.size === 1 ? [...users][0] : users.size === 0 ? settings.currentUserId : null);
+
+    // Por proyecto
+    const projMap = new Map<number, StatsResult['byProject'][number]>();
+    for (const r of rows) {
+      const p = projMap.get(r.projectId) ?? {
+        projectId: r.projectId,
+        code: r.projectCode,
+        name: r.projectName,
+        kind: r.projectKind,
+        active: r.projectActive,
+        minutes: 0,
+        percent: 0,
+        entries: 0,
+      };
+      p.minutes += r.minutes;
+      p.entries++;
+      projMap.set(r.projectId, p);
+    }
+    const byProject = [...projMap.values()]
+      .map((p) => ({ ...p, percent: percentOf(p.minutes, isAbs(p.kind) ? totalMinutes : workMinutes) }))
+      .sort((a, b) => Number(isAbs(a.kind)) - Number(isAbs(b.kind)) || b.minutes - a.minutes);
+
+    // Por tipo de trabajo (sobre el total)
+    const typeMap = new Map<WorkType, number>();
+    for (const r of rows) typeMap.set(r.workType, (typeMap.get(r.workType) ?? 0) + r.minutes);
+    const byWorkType = (['desarrollo', 'incidencia', 'mantenimiento', 'ausencia'] as WorkType[])
+      .filter((w) => typeMap.has(w))
+      .map((w) => ({ workType: w, minutes: typeMap.get(w)!, percent: percentOf(typeMap.get(w)!, totalMinutes) }));
+
+    // Por día (y días distintos)
+    const dayMap = new Map<string, number>();
+    const workDayMap = new Map<string, number>();
+    const vacDays = new Set<string>();
+    const sickDays = new Set<string>();
+    for (const r of rows) {
+      dayMap.set(r.date, (dayMap.get(r.date) ?? 0) + r.minutes);
+      if (r.projectKind === 'normal') workDayMap.set(r.date, (workDayMap.get(r.date) ?? 0) + r.minutes);
+      if (r.projectKind === 'vacation') vacDays.add(r.date);
+      if (r.projectKind === 'sick_leave') sickDays.add(r.date);
+    }
+    // Evolución diaria: hasta hoy (o el final del periodo) y como mucho los últimos 92 días.
+    let byDay: StatsResult['byDay'] = [];
+    let byDayTruncated = false;
+    if (dateFrom && dateTo) {
+      const end = dateTo > today && today >= dateFrom ? today : dateTo;
+      const start92 = addDays(end, -91);
+      const start = start92 > dateFrom ? start92 : dateFrom;
+      byDayTruncated = start > dateFrom;
+      byDay = dateRange(start, end, 92).map((date) => ({
+        date,
+        minutes: dayMap.get(date) ?? 0,
+        workday: isWorkday(date, settings.workDays),
+      }));
+    }
+
+    // Jornada esperada y días pendientes (solo con un usuario y un periodo definidos).
+    let workingDays: number | null = null;
+    let expectedMinutes: number | null = null;
+    let coveragePercent: number | null = null;
+    let elapsedWorkingDays: number | null = null;
+    const coveragePartial = !!(filter.projectId || filter.workType || (filter.search ?? '').trim());
+    const incompleteDays: StatsResult['incompleteDays'] = [];
+    if (userId && dateFrom && dateTo) {
+      const userRows = rows.filter((r) => r.userId === userId);
+      const perDay = new Map<string, number>();
+      for (const r of userRows) perDay.set(r.date, (perDay.get(r.date) ?? 0) + r.minutes);
+      const working = dateRange(dateFrom, dateTo).filter((d) => isWorkday(d, settings.workDays));
+      workingDays = working.length;
+      expectedMinutes = workingDays * settings.maxDailyMinutes;
+      // Con filtros de proyecto/tipo/búsqueda la cobertura no tiene sentido (solo se ve una parte).
+      // La cobertura solo mide los días ya transcurridos (un periodo como «Este año» incluye días futuros).
+      const elapsed = working.filter((d) => d <= today);
+      elapsedWorkingDays = elapsed.length;
+      if (!coveragePartial && elapsed.length > 0) {
+        const covered = elapsed.reduce((s, d) => s + Math.min(perDay.get(d) ?? 0, settings.maxDailyMinutes), 0);
+        coveragePercent = Math.min(100, percentOf(covered, elapsed.length * settings.maxDailyMinutes));
+        for (const d of working) {
+          if (d > today) break;
+          const m = perDay.get(d) ?? 0;
+          if (m < settings.maxDailyMinutes) {
+            incompleteDays.push({ date: d, imputedMinutes: m, pendingMinutes: settings.maxDailyMinutes - m });
+          }
+        }
+      }
+    }
+
+    return {
+      dateFrom,
+      dateTo,
+      userId,
+      totalMinutes,
+      workMinutes,
+      vacationMinutes,
+      sickMinutes,
+      entryCount: rows.length,
+      daysWithEntries: dayMap.size,
+      avgWorkMinutesPerDay: workDayMap.size ? Math.round(workMinutes / workDayMap.size) : 0,
+      vacationDays: vacDays.size,
+      sickDays: sickDays.size,
+      workingDays,
+      expectedMinutes,
+      coveragePercent,
+      elapsedWorkingDays,
+      coveragePartial,
+      byDayTruncated,
+      incompleteDays: incompleteDays.reverse().slice(0, 60),
+      byProject,
+      byWorkType,
+      byDay,
+    };
   }
 
   deleteEntry(id: number): void {
@@ -345,7 +593,8 @@ export class Repo {
   private queryEntries(where: string, params: (string | number | null)[], order: string): TimeEntry[] {
     return this.store
       .all<Row>(
-        `SELECT e.*, u.name AS user_name, p.code AS project_code, p.name AS project_name, p.active AS project_active
+        `SELECT e.*, u.name AS user_name, p.code AS project_code, p.name AS project_name, p.active AS project_active,
+                p.kind AS project_kind
          FROM time_entries e
          JOIN users u ON u.id = e.user_id
          JOIN projects p ON p.id = e.project_id
@@ -403,6 +652,12 @@ export class Repo {
   }
 }
 
+function validateKind(k: unknown): ProjectKind {
+  if (k === undefined || k === null) return 'normal';
+  if (k !== 'normal' && k !== 'vacation' && k !== 'sick_leave') throw new ValidationError('Tipo de proyecto no válido.');
+  return k;
+}
+
 function escapeLike(s: string): string {
   return s.replace(/[\\%_]/g, (c) => '\\' + c);
 }
@@ -422,6 +677,7 @@ function mapProject(r: Row): Project {
     code: String(r.code),
     name: String(r.name),
     active: Number(r.active) === 1,
+    kind: (r.kind as ProjectKind) ?? 'normal',
     entryCount: Number(r.entry_count ?? 0),
     createdAt: String(r.created_at),
     updatedAt: String(r.updated_at),
@@ -437,6 +693,7 @@ function mapEntry(r: Row): TimeEntry {
     projectCode: String(r.project_code),
     projectName: String(r.project_name),
     projectActive: Number(r.project_active) === 1,
+    projectKind: (r.project_kind as ProjectKind) ?? 'normal',
     date: String(r.date),
     minutes: Number(r.minutes),
     workType: r.work_type as TimeEntry['workType'],
