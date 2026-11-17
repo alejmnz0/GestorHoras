@@ -6,18 +6,19 @@
 
 ### Imputa tus horas en segundos. Un pequeño reloj te recuerda el resto.
 
-Aplicación de escritorio para Windows, **ligera, privada y 100 % local**, para registrar el tiempo que dedicas a cada proyecto.
+Aplicación de escritorio para **Windows y Linux**, **ligera, privada y 100 % local**, para registrar el tiempo que dedicas a cada proyecto.
 
 <br />
 
 ![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?style=for-the-badge&logo=windows11&logoColor=white)
+![Linux](https://img.shields.io/badge/Linux-AppImage%20%7C%20.deb-FCC624?style=for-the-badge&logo=linux&logoColor=black)
 ![Electron](https://img.shields.io/badge/Electron-45-47848F?style=for-the-badge&logo=electron&logoColor=white)
 ![React](https://img.shields.io/badge/React-19-149ECA?style=for-the-badge&logo=react&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?style=for-the-badge&logo=typescript&logoColor=white)
 <br />
 ![SQLite](https://img.shields.io/badge/SQLite-local-003B57?style=for-the-badge&logo=sqlite&logoColor=white)
 ![Tailwind CSS](https://img.shields.io/badge/Tailwind-4-06B6D4?style=for-the-badge&logo=tailwindcss&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-73%20unit%20%2B%2019%20E2E-22C55E?style=for-the-badge&logo=vitest&logoColor=white)
+![Tests](https://img.shields.io/badge/tests-79%20unit%20%2B%2021%20E2E-22C55E?style=for-the-badge&logo=vitest&logoColor=white)
 ![Offline](https://img.shields.io/badge/Internet-no%20necesario-64748B?style=for-the-badge)
 
 <br />
@@ -187,9 +188,17 @@ Sin servidores, cuentas, nube ni telemetría. Todo se guarda en tu PC, con **cop
 ## ⬇️ Instalación
 
 > [!TIP]
-> No necesitas instalar Node.js ni nada más. Basta con el instalador.
+> No necesitas instalar Node.js ni nada más. Basta con el instalador de tu sistema.
 
-1. Descarga **`GestorHoras-Setup-x.y.z.exe`**, que se genera con `npm run dist` en la carpeta `release/`.
+| Sistema | Fichero | Cómo se genera |
+|---|---|---|
+| 🪟 Windows 10/11 | `GestorHoras-Setup-x.y.z.exe` | `npm run dist` |
+| 🐧 Ubuntu / Debian / Mint / Pop!_OS | `GestorHoras-x.y.z-amd64.deb` | `npm run dist:linux` |
+| 🐧 Cualquier distribución (Fedora, Arch, openSUSE…) | `GestorHoras-x.y.z-x86_64.AppImage` | `npm run dist:linux` |
+
+### 🪟 Windows
+
+1. Descarga **`GestorHoras-Setup-x.y.z.exe`**.
 2. Ejecútalo. Si Windows SmartScreen muestra un aviso, pulsa **Más información → Ejecutar de todas formas** (el instalador no está firmado con un certificado de empresa).
 3. Elige la carpeta de instalación. No hacen falta permisos de administrador.
 4. Se crean accesos directos en el **escritorio** y en el **menú Inicio**. ¡Listo! 🎉
@@ -198,7 +207,37 @@ Sin servidores, cuentas, nube ni telemetría. Todo se guarda en tu PC, con **cop
 |---|---|
 | 👥 **¿Para compañeros?** | Pásales el `.exe`. Cada instalación empieza vacía y es independiente. |
 | 🔄 **¿Actualizar?** | Ejecuta el nuevo instalador encima. Tus datos **se conservan**. |
-| 💾 **¿Dónde están mis datos?** | `%APPDATA%\Gestor de Horas\gestor-horas.sqlite`. No se borran al desinstalar. |
+| 💾 **¿Dónde están mis datos?** | Windows: `%APPDATA%\Gestor de Horas\gestor-horas.sqlite` · Linux: `~/.config/Gestor de Horas/gestor-horas.sqlite`. No se borran al desinstalar. |
+
+### 🐧 Linux
+
+**Ubuntu, Debian y derivadas (recomendado):**
+
+```bash
+sudo apt install ./GestorHoras-x.y.z-amd64.deb
+```
+
+Aparece en el menú de aplicaciones como **Gestor de Horas** y se actualiza instalando el `.deb` nuevo encima.
+
+**Cualquier distribución (AppImage, sin instalar nada):**
+
+```bash
+chmod +x GestorHoras-x.y.z-x86_64.AppImage
+./GestorHoras-x.y.z-x86_64.AppImage
+```
+
+<details>
+<summary><b>Notas para Linux</b></summary>
+<br />
+
+- **Todas las funciones son las mismas que en Windows**: reloj flotante siempre visible, arrastrable y que deja pasar los clics en sus esquinas, recordatorios con sonido y animación, bandeja del sistema, temas, estadísticas, copias de seguridad, etc.
+- **Reloj flotante en Wayland** (Ubuntu 22.04+, Fedora…): Wayland no deja a las aplicaciones colocar ventanas ni mantenerlas encima, así que la app usa automáticamente **XWayland**, que ya viene con GNOME, KDE y el resto de escritorios. No tienes que hacer nada.
+- **Bandeja del sistema en GNOME**: Ubuntu la trae activada. En Fedora u otros GNOME «puros», instala la extensión *AppIndicator and KStatusNotifierItem Support*. Sin la extensión, la app funciona igual y el reloj flotante sigue siendo el acceso rápido.
+- **Iniciar al abrir la sesión** crea `~/.config/autostart/gestor-horas.desktop`, el estándar que respetan GNOME, KDE, XFCE, Cinnamon y MATE. Si usas AppImage, no lo muevas de carpeta después de activarlo.
+- **AppImage en Ubuntu 23.10 o posterior**: el sistema restringe el sandbox de Chromium, y la app lo detecta y se adapta sola para poder arrancar. Si prefieres mantener el sandbox completo, usa el `.deb`, que instala su perfil de AppArmor.
+- Si el AppImage no arranca por falta de FUSE (`libfuse2`), instálalo con `sudo apt install libfuse2t64` o ejecútalo con `--appimage-extract-and-run`.
+
+</details>
 
 ## 📖 Guía de uso
 
@@ -345,22 +384,32 @@ Apariencia (tema y color) · usuario · días laborables · jornada máxima diar
 ```bash
 npm install     # 📦 instala dependencias (requiere Node.js 20+)
 npm run dev     # 🔥 modo desarrollo (F12 abre DevTools)
-npm test        # 🧪 73 pruebas unitarias y de integración (Vitest)
+npm test        # 🧪 79 pruebas unitarias y de integración (Vitest)
 npm run build   # 🏗️ compila la interfaz y el proceso principal
-npm run dist    # 📦 genera release/GestorHoras-Setup-x.y.z.exe
+npm run dist        # 📦 instalador de Windows (.exe)
+npm run dist:linux  # 🐧 paquetes de Linux (.AppImage y .deb)
+npm run dist:all    # 📦 todo a la vez
 ```
 
 <details>
 <summary><b>🧪 Pruebas end-to-end</b></summary>
 <br />
 
-`tests/e2e/run.mjs` arranca la **aplicación Electron real** y recorre 19 escenarios: primer uso, proyectos, imputación, límites, edición, histórico, configuración, reloj flotante, **recordatorio real por temporizador con la ventana oculta**, arrastre, restauración, bandeja, persistencia tras reiniciar, proyectos especiales, vacaciones por periodo, duplicar y repetir tareas, estadísticas, **tareas comunes con reparto** (comprobando que el total cuadra) y modo noche.
+`tests/e2e/run.mjs` arranca la **aplicación Electron real** y recorre 21 escenarios: primer uso, proyectos, imputación, límites, edición, histórico, configuración, reloj flotante, **recordatorio real por temporizador con la ventana oculta**, arrastre, restauración, bandeja, persistencia tras reiniciar, proyectos especiales, vacaciones por periodo, duplicar y repetir tareas, estadísticas, **tareas comunes con reparto** (comprobando que el total cuadra) y modo noche.
 
 ```bash
 npm run build
 node tests/e2e/run.mjs                    # Windows / macOS
 xvfb-run -a sh tests/e2e/xvfb-run.sh      # Linux sin pantalla
+
+# Contra la app ya instalada o empaquetada (no el código fuente):
+E2E_EXECUTABLE="/opt/Gestor de Horas/gestor-horas" xvfb-run -a sh tests/e2e/xvfb-run.sh
+APPIMAGE_EXTRACT_AND_RUN=1 E2E_EXECUTABLE="$PWD/release/GestorHoras-x.y.z-x86_64.AppImage" xvfb-run -a sh tests/e2e/xvfb-run.sh
 ```
+
+En Linux, con `xdotool` instalado, se añaden dos escenarios más:
+- **clics reales de X11** sobre el reloj flotante, que comprueban que las esquinas dejan pasar el clic y el centro abre la app;
+- el **inicio automático** al abrir la sesión.
 
 Las capturas de este README se generan con datos ficticios mediante `node scripts/screenshots.mjs`.
 
@@ -372,8 +421,8 @@ Las capturas de este README se generan con datos ficticios mediante `node script
 
 1. Sube la versión en `package.json`, por ejemplo `"version": "1.1.0"`.
 2. Ejecuta `npm test` y comprueba que todo está ✅.
-3. Ejecuta `npm run dist`. En Windows funciona tal cual; en Linux o macOS hace falta Wine para incrustar el icono.
-4. Reparte `release/GestorHoras-Setup-1.1.0.exe`. Si se instala encima, los datos se conservan.
+3. Ejecuta `npm run dist:all`, o `npm run dist` / `npm run dist:linux` por separado. Desde Linux, el instalador de Windows necesita Wine para incrustar el icono; desde Windows, los paquetes de Linux se generan mejor en Linux o WSL.
+4. Reparte el instalador de cada sistema. Si se instala encima de la versión anterior, los datos se conservan.
 
 **¿Cambios en la base de datos?** Añade una entrada nueva al final de `MIGRATIONS` en `electron/db.ts` (nunca edites una existente). Se aplica sola al arrancar y al importar copias antiguas.
 

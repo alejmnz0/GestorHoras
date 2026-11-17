@@ -3,14 +3,29 @@
 import { _electron as electron } from 'playwright-core';
 import electronPath from 'electron';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+// E2E_EXECUTABLE permite probar la aplicación ya instalada (p. ej. "/opt/Gestor de Horas/gestor-horas").
+const packagedExe = process.env.E2E_EXECUTABLE || null;
 const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'gestor-e2e-'));
+// Configuración XDG aislada (el inicio automático de Linux escribe en ~/.config/autostart).
+const xdgConfig = fs.mkdtempSync(path.join(os.tmpdir(), 'gestor-e2e-xdg-'));
+const hasXdotool = (() => {
+  if (process.platform !== 'linux') return false;
+  try {
+    execFileSync('xdotool', ['version'], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+})();
+const xdo = (...a) => execFileSync('xdotool', a.map(String));
 const shots = path.resolve('tests/e2e/screenshots');
 fs.mkdirSync(shots, { recursive: true });
-const args = ['.', ...(process.getuid?.() === 0 ? ['--no-sandbox'] : [])];
+const args = [...(packagedExe ? [] : ['.']), ...(process.getuid?.() === 0 ? ['--no-sandbox'] : [])];
 const results = [];
 
 async function step(name, fn) {
@@ -26,7 +41,11 @@ async function step(name, fn) {
 }
 
 async function launch() {
-  const app = await electron.launch({ executablePath: electronPath, args, env: { ...process.env, GESTOR_USER_DATA: userData } });
+  const app = await electron.launch({
+    executablePath: packagedExe ?? electronPath,
+    args,
+    env: { ...process.env, GESTOR_USER_DATA: userData, XDG_CONFIG_HOME: xdgConfig },
+  });
   const main = await app.firstWindow();
   await main.waitForLoadState('domcontentloaded');
   return { app, main };
@@ -53,7 +72,7 @@ const floatingPage = async (app) => {
 };
 
 let { app, main } = await launch();
-console.log('E2E Gestor de Horas – datos en', userData);
+console.log('E2E Gestor de Horas –', packagedExe ? `app instalada: ${packagedExe}` : 'código fuente', '– datos en', userData);
 
 await step('Primer uso: pide el nombre y lo recuerda', async () => {
   await main.getByText('Bienvenido a Gestor de Horas').waitFor();
@@ -216,6 +235,48 @@ await step('Arrastrar el reloj y recordar posición', async () => {
   assert.equal(s.floatingX, after.x);
 });
 
+if (hasXdotool) {
+  await step('Linux: las esquinas transparentes del reloj dejan pasar los clics (clics reales de X11)', async () => {
+    const b = (await winState(app)).find((w) => w.url.includes('floating.html')).bounds;
+    // Identificador X11 de la ventana del reloj y ventana real bajo el puntero en cada punto.
+    const xid = await app.evaluate(({ BrowserWindow }) => {
+      const w = BrowserWindow.getAllWindows().find((x) => x.webContents.getURL().includes('floating'));
+      const h = w.getNativeWindowHandle();
+      return h.length >= 8 ? Number(h.readBigUInt64LE(0)) : h.readUInt32LE(0);
+    });
+    const windowAt = (x, y) => {
+      xdo('mousemove', x, y);
+      const out = execFileSync('xdotool', ['getmouselocation', '--shell']).toString();
+      return Number(/WINDOW=(\d+)/.exec(out)[1]);
+    };
+    assert.equal(windowAt(b.x + b.width / 2, b.y + b.height / 2), xid, 'el centro pertenece al reloj');
+    for (const [x, y] of [
+      [b.x + 2, b.y + 2],
+      [b.x + b.width - 3, b.y + 2],
+      [b.x + 2, b.y + b.height - 3],
+      [b.x + b.width - 3, b.y + b.height - 3],
+    ]) {
+      assert.notEqual(windowAt(x, y), xid, `la esquina (${x - b.x}, ${y - b.y}) debe dejar pasar el clic`);
+    }
+    // Esquina superior izquierda: fuera del círculo → el clic no llega al reloj.
+    xdo('mousemove', b.x + 3, b.y + 3);
+    xdo('click', 1);
+    await new Promise((r) => setTimeout(r, 600));
+    let ws = await winState(app);
+    assert.equal(ws.find((w) => w.url.includes('index.html')).visible, false, 'el clic en la esquina no debe abrir la app');
+    // Centro: es el reloj → abre la ventana de imputación.
+    xdo('mousemove', b.x + b.width / 2, b.y + b.height / 2);
+    xdo('click', 1);
+    await new Promise((r) => setTimeout(r, 800));
+    ws = await winState(app);
+    assert.equal(ws.find((w) => w.url.includes('index.html')).visible, true, 'el clic en el reloj abre la app');
+    assert.equal(ws.find((w) => w.url.includes('floating.html')).visible, false);
+    // Se deja como estaba para el siguiente paso.
+    await main.getByRole('button', { name: 'Minimizar a reloj flotante' }).click();
+    await new Promise((r) => setTimeout(r, 500));
+  });
+}
+
 await step('Clic en el reloj restaura la ventana de imputación', async () => {
   await floating.getByTestId('floating-clock').click();
   await new Promise((r) => setTimeout(r, 500));
@@ -369,6 +430,21 @@ await step('Tarea común a todos los proyectos: se imputa una vez y se reparte s
   await main.screenshot({ path: path.join(shots, '14-reparto.png') });
   await main.getByRole('radio', { name: 'Sin repartir' }).click();
 });
+
+if (packagedExe && process.platform === 'linux') {
+  await step('Linux: «Iniciar al abrir la sesión» crea y elimina la entrada de autoarranque', async () => {
+    const file = path.join(xdgConfig, 'autostart', 'gestor-horas.desktop');
+    await main.evaluate(() => window.api.settings.update({ autoStart: true }));
+    await new Promise((r) => setTimeout(r, 300));
+    const txt = fs.readFileSync(file, 'utf8');
+    assert.match(txt, /^Exec=".+" --hidden$/m);
+    if (process.env.APPIMAGE_EXTRACT_AND_RUN) assert.match(txt, /\.AppImage" --hidden$/m, "en AppImage debe apuntar al fichero .AppImage");
+    assert.match(txt, /Type=Application/);
+    await main.evaluate(() => window.api.settings.update({ autoStart: false }));
+    await new Promise((r) => setTimeout(r, 300));
+    assert.equal(fs.existsSync(file), false);
+  });
+}
 
 await step('Modo noche y color de acento', async () => {
   await main.getByRole('button', { name: 'Cambiar entre modo claro y modo noche' }).click();

@@ -399,10 +399,10 @@ export function ConfiguracionPage({ onAddUser }: { onAddUser: () => void }) {
 
         <Section title="Sistema">
           <Row
-            label="Iniciar con Windows"
+            label={info?.platform === 'linux' ? 'Iniciar al abrir la sesión' : 'Iniciar con Windows'}
             hint={info && !info.isPackaged ? 'Solo en la versión instalada' : 'Arranca minimizado como reloj'}
           >
-            <Toggle checked={settings.autoStart} onChange={(v) => save({ autoStart: v })} label="Iniciar con Windows" />
+            <Toggle checked={settings.autoStart} onChange={(v) => save({ autoStart: v })} label="Iniciar con el sistema" />
           </Row>
           <Row label="Al cerrar o minimizar, mantener en la bandeja del sistema" hint="Si se desactiva, cerrar la ventana sale de la aplicación">
             <Toggle checked={settings.minimizeToTray} onChange={(v) => save({ minimizeToTray: v })} label="Bandeja del sistema" />

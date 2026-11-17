@@ -27,6 +27,7 @@ import { Store } from './db';
 import { toCsv, toXlsx } from './exporter';
 import { initLogger, log } from './logger';
 import { ReminderScheduler, endOfToday } from './reminders';
+import { circleShape } from './shape';
 import { Repo } from './repo';
 import { ValidationError, isWorkday, todayIso } from '../shared/rules';
 import type {
@@ -49,6 +50,25 @@ import type { PauseOption } from '../shared/api';
 if (process.env.GESTOR_USER_DATA) app.setPath('userData', process.env.GESTOR_USER_DATA);
 // Interfaz en español (formato de fecha DD/MM/AAAA en los selectores) sea cual sea el idioma del sistema.
 app.commandLine.appendSwitch('lang', 'es-ES');
+
+const IS_LINUX = process.platform === 'linux';
+if (IS_LINUX) {
+  // El reloj flotante necesita colocarse en pantalla y estar siempre encima, y Wayland no permite
+  // ninguna de las dos cosas a las aplicaciones. Se usa X11 (XWayland, incluido en GNOME, KDE…).
+  if (!app.commandLine.hasSwitch('ozone-platform')) app.commandLine.appendSwitch('ozone-platform', 'x11');
+  // AppImage en Ubuntu 23.10+ y derivadas: AppArmor impide el sandbox de Chromium y la app no
+  // arrancaría. Solo en ese caso se desactiva (la app solo carga contenido local propio).
+  // El paquete .deb no lo necesita: instala el sandbox con los permisos correctos.
+  if (process.env.APPIMAGE && unprivilegedUserNamespacesRestricted()) app.commandLine.appendSwitch('no-sandbox');
+}
+
+function unprivilegedUserNamespacesRestricted(): boolean {
+  try {
+    return fs.readFileSync('/proc/sys/kernel/apparmor_restrict_unprivileged_userns', 'utf8').trim() === '1';
+  } catch {
+    return false;
+  }
+}
 
 const DEV_URL = process.env.VITE_DEV_SERVER_URL;
 const START_HIDDEN = process.argv.includes('--hidden');
@@ -269,8 +289,7 @@ function createFloatingWindow() {
   });
   floatingWindow.setAlwaysOnTop(true, 'screen-saver');
   floatingWindow.setVisibleOnAllWorkspaces(true);
-  // Las zonas transparentes dejan pasar los clics; el renderer lo desactiva al pasar sobre el reloj.
-  floatingWindow.setIgnoreMouseEvents(true, { forward: true });
+  enableFloatingClickThrough(floatingWindow);
   hardenNavigation(floatingWindow);
   loadPage(floatingWindow, 'floating');
   floatingWindow.on('closed', () => (floatingWindow = null));
@@ -286,11 +305,25 @@ function showFloating() {
   const p = floatingPosition();
   floatingWindow.setPosition(p.x, p.y);
   // Al reaparecer, las zonas transparentes vuelven a dejar pasar los clics.
-  floatingWindow.setIgnoreMouseEvents(true, { forward: true });
+  enableFloatingClickThrough(floatingWindow);
   floatingWindow.webContents.send('floating:shown');
   if (!floatingWindow.isVisible()) floatingWindow.showInactive();
   floatingWindow.setAlwaysOnTop(true, 'screen-saver');
 }
+
+/**
+ * Las zonas transparentes alrededor del reloj dejan pasar los clics a las ventanas de debajo.
+ * - Windows/macOS: se ignoran los eventos del ratón y el renderer los reactiva al pasar sobre el reloj.
+ * - Linux: esa opción no existe; la ventana adopta forma circular (XShape) y fuera del círculo
+ *   los clics llegan directamente a lo que hay debajo.
+ */
+function enableFloatingClickThrough(win: BrowserWindow) {
+  if (IS_LINUX) win.setShape(circleShape(FLOAT_SIZE, FLOAT_SHAPE_RADIUS));
+  else win.setIgnoreMouseEvents(true, { forward: true });
+}
+
+/** Radio de la zona clicable en Linux: el reloj (28 px) más margen para la animación de agitarse. */
+const FLOAT_SHAPE_RADIUS = 35;
 
 /** Calcula la posición del reloj: la guardada si sigue siendo visible en alguna pantalla, o un preset. */
 function floatingPosition(): { x: number; y: number } {
@@ -421,12 +454,43 @@ function applyTheme(s: Settings) {
 }
 
 function applyAutoStart(enabled: boolean) {
-  if (!app.isPackaged || process.platform !== 'win32') return;
+  if (!app.isPackaged) return;
   try {
-    app.setLoginItemSettings({ openAtLogin: enabled, args: ['--hidden'] });
+    if (process.platform === 'win32') app.setLoginItemSettings({ openAtLogin: enabled, args: ['--hidden'] });
+    else if (IS_LINUX) applyLinuxAutoStart(enabled);
   } catch (e) {
     log.error('No se pudo configurar el inicio automático', e);
   }
+}
+
+/**
+ * Linux: inicio automático estándar de freedesktop.org (~/.config/autostart/*.desktop),
+ * que respetan GNOME, KDE, XFCE, Cinnamon, MATE…
+ */
+function applyLinuxAutoStart(enabled: boolean) {
+  const file = path.join(app.getPath('appData'), 'autostart', 'gestor-horas.desktop');
+  if (!enabled) {
+    fs.rmSync(file, { force: true });
+    return;
+  }
+  // En AppImage, process.execPath apunta a un montaje temporal: hay que usar la ruta del .AppImage.
+  const exe = process.env.APPIMAGE || process.execPath;
+  const quoted = `"${exe.replace(/[\\"`$]/g, (c) => '\\' + c)}"`;
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(
+    file,
+    [
+      '[Desktop Entry]',
+      'Type=Application',
+      'Name=Gestor de Horas',
+      'Comment=Registro e imputación de horas de trabajo',
+      `Exec=${quoted} --hidden`,
+      'Icon=gestor-horas',
+      'Terminal=false',
+      'X-GNOME-Autostart-enabled=true',
+      '',
+    ].join('\n'),
+  );
 }
 
 function afterSettingsChanged(before: Settings, after: Settings) {
@@ -638,7 +702,8 @@ function registerIpc() {
     return s.currentUserId ? repo.daySummary(s.currentUserId, todayIso()) : null;
   });
   on('floating:setIgnoreMouse', (ignore: boolean) => {
-    floatingWindow?.setIgnoreMouseEvents(!!ignore, { forward: true });
+    // En Linux el paso de clics lo resuelve la forma circular de la ventana.
+    if (!IS_LINUX) floatingWindow?.setIgnoreMouseEvents(!!ignore, { forward: true });
   });
   on('floating:dragStart', () => {
     if (!floatingWindow) return;

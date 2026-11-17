@@ -31,6 +31,31 @@ nsis:
   deleteAppDataOnUninstall: false
   runAfterFinish: true
   language: "3082"
+linux:
+  target:
+    - target: AppImage
+      arch: [x64]
+    - target: deb
+      arch: [x64]
+  icon: build/icons
+  category: Office
+  executableName: gestor-horas
+  # Wayland no permite colocar ventanas ni mantenerlas encima (lo necesita el reloj flotante).
+  executableArgs: ["--ozone-platform=x11"]
+  synopsis: Registro e imputación de horas de trabajo
+  description: Herramienta personal y local para registrar e imputar horas de trabajo a proyectos, con reloj flotante y recordatorios.
+  maintainer: Alejandro Jiménez <alejmnz0@users.noreply.github.com>
+  artifactName: GestorHoras-${version}-${arch}.${ext}
+  desktop:
+    entry:
+      Name: Gestor de Horas
+      Comment: Registro e imputación de horas de trabajo
+      Keywords: horas;imputación;tiempo;proyectos;
+      StartupWMClass: Gestor de Horas
+deb:
+  # Bandeja del sistema en GNOME/Ubuntu (AppIndicator); el resto ya lo incluye electron-builder.
+  recommends:
+    - libayatana-appindicator3-1
 # Solo los idiomas necesarios (reduce el tamaño del instalador).
 electronLanguages:
   - es

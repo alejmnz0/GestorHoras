@@ -36,4 +36,10 @@ big.save('build/icon.ico', sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 6
 tray = draw_icon(64)
 tray.resize((32, 32), Image.LANCZOS).save('build/tray.png')
 tray.save('build/tray.ico', sizes=[(16, 16), (24, 24), (32, 32), (48, 48)])
+# Linux: iconos en todos los tamaños estándar (electron-builder los instala en hicolor).
+import os
+os.makedirs('build/icons', exist_ok=True)
+hi = draw_icon(512)
+for size in (16, 24, 32, 48, 64, 128, 256, 512):
+    (hi if size == 512 else hi.resize((size, size), Image.LANCZOS)).save(f'build/icons/{size}x{size}.png')
 print('iconos generados')

@@ -1,7 +1,7 @@
 {
   "name": "gestor-horas",
   "productName": "Gestor de Horas",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Herramienta personal para registrar e imputar horas de trabajo",
   "author": "Alejandro Jiménez",
   "license": "UNLICENSED",
@@ -13,7 +13,9 @@
     "start": "electron .",
     "test": "vitest run",
     "test:e2e": "node scripts/build-electron.mjs && playwright-core --version >/dev/null && node tests/e2e/run.mjs",
-    "dist": "npm run build && electron-builder --win nsis --x64 --publish never"
+    "dist": "npm run build && electron-builder --win nsis --x64 --publish never",
+    "dist:linux": "npm run build && electron-builder --linux AppImage deb --x64 --publish never",
+    "dist:all": "npm run build && electron-builder --win nsis --linux AppImage deb --x64 --publish never"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.5",
@@ -35,5 +37,6 @@
     "vite": "^8.3.8",
     "vitest": "^5.1.0",
     "xlsx": "^0.18.5"
-  }
+  },
+  "homepage": "https://github.com/alejmnz0/GestorHoras"
 }
