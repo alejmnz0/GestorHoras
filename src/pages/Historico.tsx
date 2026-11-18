@@ -128,7 +128,7 @@ export function HistoricoPage({
     return () => {
       alive = false;
     };
-  }, [tab, filter, distribution, dataVersion, settings.maxDailyMinutes, settings.workDays.join(',')]);
+  }, [tab, filter, distribution, dataVersion, JSON.stringify(settings.schedules), settings.activeScheduleId]);
 
   const openTab = (k: Tab) => {
     // Las estadísticas necesitan un periodo: si no hay ninguno se propone «Este mes».

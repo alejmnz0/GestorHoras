@@ -13,8 +13,15 @@ import {
   isAbsenceKind,
   isValidIsoDate,
   isWorkKind,
-  isWorkday,
+  LEGACY_SCHEDULE_ID,
+  activeSchedule,
+  dayLimitFor,
+  expectedMinutesFor,
+  isWorkdayFor,
+  legacySchedule,
   projectKindLabel,
+  validateRoutineItems,
+  validateRoutineName,
   todayIso,
   isWorkType,
   percentOf,
@@ -40,7 +47,11 @@ import type {
   HistoryResult,
   Project,
   ProjectInput,
+  Routine,
+  RoutineApplyResult,
+  RoutineInput,
   Settings,
+  WorkSchedule,
   TimeEntry,
   User,
 } from '../shared/types';
@@ -192,6 +203,15 @@ export class Repo {
           `No se puede eliminar "${p.name}" porque tiene ${p.entryCount} imputación(es). Desactívalo en su lugar.`,
         );
       }
+      const inRoutine = this.store.get<Row>(
+        'SELECT r.name FROM routine_items i JOIN routines r ON r.id = i.routine_id WHERE i.project_id = ? LIMIT 1',
+        [id],
+      );
+      if (inRoutine) {
+        throw new ValidationError(
+          `No se puede eliminar "${p.name}" porque se usa en la rutina "${inRoutine.name}". Quítalo de la rutina o desactívalo.`,
+        );
+      }
       this.store.run('DELETE FROM projects WHERE id = ?', [id]);
     });
   }
@@ -233,7 +253,7 @@ export class Repo {
 
   daySummary(userId: number, date: string): DaySummary {
     const settings = this.getSettings();
-    const maxMinutes = settings.maxDailyMinutes;
+    const maxMinutes = dayLimitFor(date, settings);
     const imputedMinutes = this.dayMinutes(userId, date);
     const abs = this.store.get<{ v: number; s: number }>(
       `SELECT COALESCE(SUM(CASE WHEN p.kind = 'vacation' THEN e.minutes END), 0) AS v,
@@ -242,7 +262,7 @@ export class Repo {
       [userId, date],
     );
     return {
-      workday: isWorkday(date, settings.workDays),
+      workday: isWorkdayFor(date, settings),
       vacationMinutes: Number(abs?.v ?? 0),
       sickMinutes: Number(abs?.s ?? 0),
       date,
@@ -296,7 +316,7 @@ export class Repo {
     }
 
     // Límite diario: al editar se descuenta el valor anterior del propio registro.
-    const max = this.getSettings().maxDailyMinutes;
+    const max = dayLimitFor(input.date, this.getSettings());
     const previous = editingId !== null ? this.getEntry(editingId) : undefined;
     // Si se edita sin cambiar de día/usuario y sin aumentar horas, se permite aunque el día ya
     // supere el máximo (p. ej. tras reducir la jornada configurada).
@@ -379,16 +399,17 @@ export class Repo {
     }
     if (!project.active) throw new ValidationError(`El proyecto de ${label} "${project.name}" está inactivo.`);
 
-    const { maxDailyMinutes, workDays } = this.getSettings();
+    const settings = this.getSettings();
     const result: AbsenceResult = { dates: [], skippedFull: [], skippedNonWorking: 0, truncated: [] };
     return this.store.transaction(() => {
       const t = this.ts();
       for (const date of days) {
-        if (!isWorkday(date, workDays)) {
+        const expected = expectedMinutesFor(date, settings);
+        if (expected === 0) {
           result.skippedNonWorking++;
           continue;
         }
-        const pending = maxDailyMinutes - this.dayMinutes(input.userId, date);
+        const pending = expected - this.dayMinutes(input.userId, date);
         const minutes = input.minutesPerDay === null ? pending : Math.min(input.minutesPerDay, pending);
         if (minutes < SLOT_MINUTES) {
           result.skippedFull.push(date);
@@ -504,12 +525,14 @@ export class Repo {
       byDay = dateRange(start, end, 92).map((date) => ({
         date,
         minutes: dayMap.get(date) ?? 0,
-        workday: isWorkday(date, settings.workDays),
+        workday: isWorkdayFor(date, settings),
+        expectedMinutes: expectedMinutesFor(date, settings),
       }));
     }
 
     // Jornada esperada y días pendientes (solo con un usuario y un periodo definidos).
     let workingDays: number | null = null;
+    let uniformDailyMinutes: number | null = null;
     let expectedMinutes: number | null = null;
     let coveragePercent: number | null = null;
     let elapsedWorkingDays: number | null = null;
@@ -519,21 +542,35 @@ export class Repo {
       const userRows = rows.filter((r) => r.userId === userId);
       const perDay = new Map<string, number>();
       for (const r of userRows) perDay.set(r.date, (perDay.get(r.date) ?? 0) + r.minutes);
-      const working = dateRange(dateFrom, dateTo).filter((d) => isWorkday(d, settings.workDays));
+      const expectedOf = new Map<string, number>();
+      for (const d of dateRange(dateFrom, dateTo)) {
+        const m = expectedMinutesFor(d, settings);
+        if (m > 0) expectedOf.set(d, m);
+      }
+      const working = [...expectedOf.keys()];
+      const exp = (d: string) => expectedOf.get(d) ?? 0;
       workingDays = working.length;
-      expectedMinutes = workingDays * settings.maxDailyMinutes;
+      expectedMinutes = working.reduce((s, d) => s + exp(d), 0);
+      const distinct = new Set(expectedOf.values());
+      uniformDailyMinutes = distinct.size === 1 ? [...distinct][0] : null;
       // Con filtros de proyecto/tipo/búsqueda la cobertura no tiene sentido (solo se ve una parte).
       // La cobertura solo mide los días ya transcurridos (un periodo como «Este año» incluye días futuros).
       const elapsed = working.filter((d) => d <= today);
       elapsedWorkingDays = elapsed.length;
       if (!coveragePartial && elapsed.length > 0) {
-        const covered = elapsed.reduce((s, d) => s + Math.min(perDay.get(d) ?? 0, settings.maxDailyMinutes), 0);
-        coveragePercent = Math.min(100, percentOf(covered, elapsed.length * settings.maxDailyMinutes));
+        const covered = elapsed.reduce((s, d) => s + Math.min(perDay.get(d) ?? 0, exp(d)), 0);
+        coveragePercent = Math.min(
+          100,
+          percentOf(
+            covered,
+            elapsed.reduce((s, d) => s + exp(d), 0),
+          ),
+        );
         for (const d of working) {
           if (d > today) break;
           const m = perDay.get(d) ?? 0;
-          if (m < settings.maxDailyMinutes) {
-            incompleteDays.push({ date: d, imputedMinutes: m, pendingMinutes: settings.maxDailyMinutes - m });
+          if (m < exp(d)) {
+            incompleteDays.push({ date: d, imputedMinutes: m, pendingMinutes: exp(d) - m });
           }
         }
       }
@@ -553,6 +590,7 @@ export class Repo {
       vacationDays: vacDays.size,
       sickDays: sickDays.size,
       workingDays,
+      uniformDailyMinutes,
       expectedMinutes,
       coveragePercent,
       elapsedWorkingDays,
@@ -722,7 +760,8 @@ export class Repo {
   // Configuración (tabla clave/valor con valores JSON)
   // -------------------------------------------------------------------------
 
-  getSettings(): Settings {
+  /** Configuración tal como está guardada (sin completar los horarios). */
+  private rawSettings(): Settings {
     const rows = this.store.all<{ key: string; value: string }>('SELECT key, value FROM settings');
     const s: Settings = { ...DEFAULT_SETTINGS };
     for (const r of rows) {
@@ -737,11 +776,55 @@ export class Repo {
     return s;
   }
 
+  /**
+   * Configuración efectiva. Si no hay horarios guardados (instalaciones anteriores) se presenta
+   * el horario clásico equivalente (misma jornada en todos los días laborables).
+   */
+  getSettings(): Settings {
+    const s = this.rawSettings();
+    if (!Array.isArray(s.schedules) || s.schedules.length === 0) {
+      s.schedules = [legacySchedule(s.maxDailyMinutes, s.workDays)];
+      s.activeScheduleId = LEGACY_SCHEDULE_ID;
+    } else if (!s.schedules.some((x) => x.id === s.activeScheduleId)) {
+      s.activeScheduleId = (s.schedules.find((x) => !x.period) ?? s.schedules[0]).id;
+    }
+    return s;
+  }
+
   updateSettings(patch: Partial<Settings>): Settings {
     const clean = validateSettingsPatch((patch ?? {}) as Record<string, unknown>);
     if (clean.currentUserId != null && !this.getUser(clean.currentUserId)) {
       throw new ValidationError('El usuario seleccionado no existe.');
     }
+    const raw = this.rawSettings();
+    const hasStoredSchedules = Array.isArray(raw.schedules) && raw.schedules.length > 0;
+    const legacyPatch = clean.maxDailyMinutes !== undefined || clean.workDays !== undefined;
+
+    if (clean.schedules || clean.activeScheduleId !== undefined || (legacyPatch && hasStoredSchedules)) {
+      const current = this.getSettings();
+      let schedules: WorkSchedule[] = clean.schedules ?? current.schedules;
+      let activeId = clean.activeScheduleId === undefined ? current.activeScheduleId : clean.activeScheduleId;
+      if (activeId !== null && !schedules.some((x) => x.id === activeId)) {
+        if (clean.activeScheduleId !== undefined && !clean.schedules) throw new ValidationError('El horario no existe.');
+        activeId = null;
+      }
+      if (!clean.schedules && legacyPatch) {
+        // Compatibilidad: «jornada máxima» y «días laborables» modifican el horario principal.
+        const main = activeSchedule({ ...current, schedules, activeScheduleId: activeId });
+        const minutes = clean.maxDailyMinutes ?? Math.max(...main.minutes);
+        const days = clean.workDays ?? main.minutes.flatMap((m, d) => (m > 0 ? [d] : []));
+        schedules = schedules.map((x) =>
+          x.id === main.id ? { ...x, minutes: x.minutes.map((_, d) => (days.includes(d) ? minutes : 0)) } : x,
+        );
+      }
+      const main = activeSchedule({ ...current, schedules, activeScheduleId: activeId });
+      clean.schedules = schedules;
+      clean.activeScheduleId = main.id;
+      // Los campos clásicos reflejan el horario principal (copias antiguas y compatibilidad).
+      clean.maxDailyMinutes = Math.max(...main.minutes);
+      clean.workDays = main.minutes.flatMap((m, d) => (m > 0 ? [d] : []));
+    }
+
     this.store.transaction(() => {
       const t = this.ts();
       for (const [key, value] of Object.entries(clean)) {
@@ -753,6 +836,227 @@ export class Repo {
       }
     });
     return this.getSettings();
+  }
+
+  /** Ajuste interno que la interfaz no puede cambiar directamente (p. ej. la imagen de fondo). */
+  setInternalSetting(key: 'wallpaperImageId', value: string | null): Settings {
+    this.store.transaction(() =>
+      this.store.run(
+        `INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+        [key, JSON.stringify(value), this.ts()],
+      ),
+    );
+    return this.getSettings();
+  }
+
+  // -------------------------------------------------------------------------
+  // Rutinas
+  // -------------------------------------------------------------------------
+
+  private routineSql(where: string): string {
+    return `SELECT r.*, (SELECT MAX(date) FROM routine_runs x WHERE x.routine_id = r.id) AS last_applied,
+                   EXISTS (SELECT 1 FROM routine_runs x WHERE x.routine_id = r.id AND x.date = ?) AS applied_on
+            FROM routines r ${where}`;
+  }
+
+  /** Rutinas del usuario; `date` indica para qué día se calcula «ya aplicada». */
+  listRoutines(userId: number, date: string = todayIso()): Routine[] {
+    return this.store
+      .all<Row>(this.routineSql('WHERE r.user_id = ? ORDER BY r.name COLLATE NOCASE'), [date, userId])
+      .map((r) => this.mapRoutine(r));
+  }
+
+  getRoutine(id: number, date: string = todayIso()): Routine | undefined {
+    const r = this.store.get<Row>(this.routineSql('WHERE r.id = ?'), [date, id]);
+    return r ? this.mapRoutine(r) : undefined;
+  }
+
+  private mapRoutine(r: Row): Routine {
+    const items = this.store
+      .all<Row>(
+        `SELECT i.*, p.code AS project_code, p.name AS project_name, p.active AS project_active, p.kind AS project_kind
+         FROM routine_items i JOIN projects p ON p.id = i.project_id
+         WHERE i.routine_id = ? ORDER BY i.position, i.id`,
+        [Number(r.id)],
+      )
+      .map((i) => ({
+        projectId: Number(i.project_id),
+        minutes: Number(i.minutes),
+        workType: i.work_type as WorkType,
+        description: String(i.description ?? ''),
+        projectCode: String(i.project_code),
+        projectName: String(i.project_name),
+        projectActive: Number(i.project_active) === 1,
+        projectKind: (i.project_kind as ProjectKind) ?? 'normal',
+      }));
+    return {
+      id: Number(r.id),
+      userId: Number(r.user_id),
+      name: String(r.name),
+      items,
+      totalMinutes: items.reduce((s, i) => s + i.minutes, 0),
+      autoApply: Number(r.auto_apply) === 1,
+      lastAppliedDate: r.last_applied ? String(r.last_applied) : null,
+      appliedOnDate: Number(r.applied_on) === 1,
+      createdAt: String(r.created_at),
+      updatedAt: String(r.updated_at),
+    };
+  }
+
+  private validateRoutineInput(input: RoutineInput, exceptId: number | null) {
+    if (!input || typeof input !== 'object') throw new ValidationError('Datos de la rutina no válidos.');
+    if (!Number.isInteger(input.userId) || !this.getUser(input.userId)) throw new ValidationError('Usuario no válido.');
+    const name = validateRoutineName(input.name);
+    const previous = exceptId !== null ? this.getRoutine(exceptId) : undefined;
+    const items = validateRoutineItems(input.items).map((it) => {
+      const p = this.getProject(it.projectId);
+      if (!p) throw new ValidationError('Uno de los proyectos de la rutina no existe.');
+      if (!p.active && !previous?.items.some((x) => x.projectId === p.id)) {
+        throw new ValidationError(`El proyecto "${p.name}" está inactivo.`);
+      }
+      // Igual que en las imputaciones: vacaciones y baja siempre son «ausencia».
+      if (isAbsenceKind(p.kind)) return { ...it, workType: 'ausencia' as WorkType };
+      if (it.workType === 'ausencia') throw new ValidationError(`Elige el tipo de trabajo de la tarea de "${p.name}".`);
+      return it;
+    });
+    if (items.reduce((s, i) => s + i.minutes, 0) > 24 * 60) {
+      throw new ValidationError('La rutina no puede sumar más de 24 h.');
+    }
+    const dup = this.store.get('SELECT id FROM routines WHERE user_id = ? AND name = ? COLLATE NOCASE AND id IS NOT ?', [
+      input.userId,
+      name,
+      exceptId,
+    ]);
+    if (dup) throw new ValidationError(`Ya tienes una rutina llamada "${name}".`);
+    return { name, items, autoApply: !!input.autoApply };
+  }
+
+  private writeRoutineItems(routineId: number, items: RoutineInput['items']) {
+    this.store.run('DELETE FROM routine_items WHERE routine_id = ?', [routineId]);
+    items.forEach((it, i) =>
+      this.store.run(
+        `INSERT INTO routine_items (routine_id, project_id, position, minutes, work_type, description)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [routineId, it.projectId, i, it.minutes, it.workType, it.description ?? ''],
+      ),
+    );
+  }
+
+  createRoutine(input: RoutineInput): Routine {
+    return this.store.transaction(() => {
+      const { name, items, autoApply } = this.validateRoutineInput(input, null);
+      const t = this.ts();
+      this.store.run('INSERT INTO routines (user_id, name, auto_apply, created_at, updated_at) VALUES (?, ?, ?, ?, ?)', [
+        input.userId,
+        name,
+        autoApply ? 1 : 0,
+        t,
+        t,
+      ]);
+      const id = this.store.lastInsertId();
+      this.writeRoutineItems(id, items);
+      return this.getRoutine(id)!;
+    });
+  }
+
+  updateRoutine(id: number, input: RoutineInput): Routine {
+    return this.store.transaction(() => {
+      const current = this.getRoutine(id);
+      if (!current) throw new ValidationError('La rutina ya no existe.');
+      const { name, items, autoApply } = this.validateRoutineInput({ ...input, userId: current.userId }, id);
+      this.store.run('UPDATE routines SET name = ?, auto_apply = ?, updated_at = ? WHERE id = ?', [
+        name,
+        autoApply ? 1 : 0,
+        this.ts(),
+        id,
+      ]);
+      this.writeRoutineItems(id, items);
+      return this.getRoutine(id)!;
+    });
+  }
+
+  deleteRoutine(id: number): void {
+    this.store.transaction(() => {
+      if (!this.getRoutine(id)) throw new ValidationError('La rutina ya no existe.');
+      this.store.run('DELETE FROM routines WHERE id = ?', [id]);
+    });
+  }
+
+  /**
+   * Imputa de una vez todas las tareas de la rutina en la fecha indicada.
+   * Respeta la jornada: si una tarea no cabe entera se imputa lo que quepa, y se omiten las de
+   * proyectos inactivos. Si no se puede imputar nada, no se guarda nada.
+   */
+  applyRoutine(id: number, date: string): RoutineApplyResult {
+    if (!isValidIsoDate(date)) throw new ValidationError('La fecha no es válida.');
+    return this.store.transaction(() => {
+      const routine = this.getRoutine(id, date);
+      if (!routine) throw new ValidationError('La rutina ya no existe.');
+      const limit = dayLimitFor(date, this.getSettings());
+      let used = this.dayMinutes(routine.userId, date);
+      const result: RoutineApplyResult = { routineId: id, date, created: 0, minutes: 0, skipped: [] };
+      const t = this.ts();
+      for (const it of routine.items) {
+        if (!it.projectActive) {
+          result.skipped.push({ projectName: it.projectName, minutes: it.minutes, reason: 'inactive' });
+          continue;
+        }
+        const available = Math.max(0, limit - used);
+        const minutes = Math.min(it.minutes, available - (available % SLOT_MINUTES));
+        if (minutes < it.minutes) {
+          result.skipped.push({ projectName: it.projectName, minutes: it.minutes - minutes, reason: 'full' });
+        }
+        if (minutes < SLOT_MINUTES) continue;
+        this.store.run(
+          `INSERT INTO time_entries (user_id, project_id, date, minutes, work_type, description, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [routine.userId, it.projectId, date, minutes, it.workType, it.description, t, t],
+        );
+        used += minutes;
+        result.created++;
+        result.minutes += minutes;
+      }
+      if (result.created === 0) {
+        throw new ValidationError(
+          result.skipped.every((x) => x.reason === 'inactive')
+            ? 'Todos los proyectos de la rutina están inactivos.'
+            : 'La jornada de este día ya está completa: no cabe ninguna tarea de la rutina.',
+        );
+      }
+      this.markRoutineRun(id, date);
+      return result;
+    });
+  }
+
+  private markRoutineRun(id: number, date: string) {
+    this.store.run('INSERT OR REPLACE INTO routine_runs (routine_id, date, created_at) VALUES (?, ?, ?)', [
+      id,
+      date,
+      this.ts(),
+    ]);
+  }
+
+  /**
+   * Aplica las rutinas automáticas del usuario en `date` si es laborable, no hay vacaciones ni
+   * baja registradas y aún no se revisaron ese día. Devuelve lo aplicado.
+   */
+  autoApplyRoutines(userId: number, date: string = todayIso()): (RoutineApplyResult & { name: string })[] {
+    if (!this.getUser(userId) || !isWorkdayFor(date, this.getSettings())) return [];
+    const out: (RoutineApplyResult & { name: string })[] = [];
+    for (const r of this.listRoutines(userId, date)) {
+      if (!r.autoApply || r.appliedOnDate) continue;
+      const summary = this.daySummary(userId, date);
+      if (summary.vacationMinutes > 0 || summary.sickMinutes > 0) break;
+      try {
+        out.push({ ...this.applyRoutine(r.id, date), name: r.name });
+      } catch (e) {
+        if (!(e instanceof ValidationError)) throw e;
+        // Día completo o proyectos inactivos: se marca como revisada para no reintentarlo todo el día.
+        this.store.transaction(() => this.markRoutineRun(r.id, date));
+      }
+    }
+    return out;
   }
 
   /** Restaura los valores predeterminados manteniendo el usuario actual. */

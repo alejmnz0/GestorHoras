@@ -47,6 +47,17 @@ const api: Api = {
     registerAbsence: (input) => call('entries:registerAbsence', input),
     exportHistory: (filter, format) => call('entries:exportHistory', filter, format),
   },
+  routines: {
+    list: (userId, date) => call('routines:list', userId, date),
+    create: (input) => call('routines:create', input),
+    update: (id, input) => call('routines:update', id, input),
+    remove: (id) => call('routines:remove', id),
+    apply: (id, date) => call('routines:apply', id, date),
+  },
+  appearance: {
+    pickWallpaper: () => call('appearance:pickWallpaper'),
+    wallpaperImage: () => call('appearance:wallpaperImage'),
+  },
   settings: {
     get: () => call('settings:get'),
     update: (patch) => call('settings:update', patch),
@@ -81,6 +92,7 @@ const api: Api = {
     reminder: (cb) => subscribe('reminder', cb),
     reminderStatus: (cb) => subscribe('reminders:status', cb),
     floatingShown: (cb) => subscribe('floating:shown', cb),
+    routinesAutoApplied: (cb) => subscribe('routines:autoApplied', cb),
   },
 };
 

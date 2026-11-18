@@ -140,7 +140,7 @@ await shot('ausencia.png');
 await dlg.getByRole('button', { name: 'Cancelar' }).click();
 
 await main.getByRole('button', { name: 'Configuración' }).click();
-await main.getByText('Horas máximas diarias').waitFor();
+await main.getByText('Horarios y jornada').waitFor();
 await shot('configuracion.png');
 
 // Modo noche

@@ -190,7 +190,7 @@ await step('Histórico: tabla, filtros, total y día anterior', async () => {
 
 await step('Configuración visible y recordatorio cada 1 minuto', async () => {
   await main.getByRole('button', { name: 'Configuración' }).click();
-  await main.getByText('Horas máximas diarias').waitFor();
+  await main.getByText('Horarios y jornada').waitFor();
   await main.screenshot({ path: path.join(shots, '05-configuracion.png'), fullPage: true });
   // Intervalo personalizado de 1 minuto para probar el temporizador real
   await main.evaluate(() => window.api.settings.update({ reminderIntervalMinutes: 1, skipRemindersWhenComplete: false }));
@@ -445,6 +445,87 @@ if (packagedExe && process.platform === 'linux') {
     assert.equal(fs.existsSync(file), false);
   });
 }
+
+await step('Rutinas: crear desde la interfaz e imputar con un clic', async () => {
+  await main.getByRole('button', { name: 'Imputar horas', exact: true }).click();
+  // Un lunes libre dentro de unas semanas (no laborable/ausencias de pasos anteriores no interfieren).
+  const date = await main.evaluate(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 21 + ((8 - d.getDay()) % 7));
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  });
+  await main.locator('input[type="date"]').first().fill(date);
+  await main.getByRole('button', { name: 'Nueva rutina' }).click();
+  const dlg = main.getByRole('dialog', { name: 'Nueva rutina' });
+  await dlg.getByPlaceholder('p. ej. Tareas de cada mañana').fill('Mañanas');
+  await dlg.getByLabel('Proyecto de la tarea 1').selectOption({ index: 1 });
+  await dlg.getByLabel('Tipo de la tarea 1').selectOption('mantenimiento');
+  await dlg.getByLabel('Descripción de la tarea 1').fill('Revisar correo');
+  await dlg.getByRole('button', { name: 'Añadir tarea' }).click();
+  await dlg.getByLabel('Proyecto de la tarea 2').selectOption({ index: 1 });
+  await dlg.getByLabel('Tipo de la tarea 2').selectOption('incidencia');
+  await dlg.getByRole('group', { name: 'Horas' }).nth(1).getByRole('button', { name: 'Sumar 15 minutos' }).click();
+  await main.screenshot({ path: path.join(shots, '13-rutina-editor.png') });
+  await dlg.getByRole('button', { name: 'Guardar rutina' }).click();
+  await main.getByText('Rutina «Mañanas» creada').waitFor();
+  await main.getByRole('button', { name: 'Imputar', exact: true }).click();
+  await main.getByText('Rutina «Mañanas» aplicada').waitFor();
+  const day = await main.evaluate(
+    ([d]) => window.api.settings.get().then((s) => window.api.entries.day(s.currentUserId, d)),
+    [date],
+  );
+  assert.equal(day.entries.length, 2);
+  assert.equal(day.summary.imputedMinutes, 60 + 75);
+  // Volver a imputar pide confirmación.
+  await main.getByRole('button', { name: 'Imputar', exact: true }).click();
+  await main.getByRole('dialog', { name: 'Aplicar de nuevo' }).getByRole('button', { name: 'Cancelar' }).click();
+  await main.waitForTimeout(300);
+  await main.screenshot({ path: path.join(shots, '14-rutinas.png') });
+});
+
+await step('Horarios: viernes 7 h y horario de verano por fechas', async () => {
+  await main.getByRole('button', { name: 'Configuración' }).click();
+  await main.getByText('Horarios y jornada').waitFor();
+  for (let i = 0; i < 5; i++) await main.getByRole('button', { name: 'Restar 15 minutos el Viernes' }).first().click();
+  await main.getByRole('button', { name: 'Añadir horario' }).click();
+  await main.getByRole('button', { name: /^Verano: L-V 7 h/ }).click();
+  await main.getByRole('button', { name: 'Guardar horarios' }).click();
+  await main.getByText('Horarios guardados').waitFor();
+  const s = await main.evaluate(() => window.api.settings.get());
+  assert.equal(s.schedules.length, 2);
+  assert.deepEqual(s.schedules[0].minutes.slice(1, 6), [495, 495, 495, 495, 420]);
+  assert.deepEqual(s.schedules[1].period, { from: '06-15', to: '09-15' });
+  // 2027-01-15 es viernes; 2027-07-14 es miércoles en verano.
+  const [fri, summer, mon] = await main.evaluate((uid) =>
+    Promise.all(['2027-01-15', '2027-07-14', '2027-01-11'].map((d) => window.api.entries.day(uid, d))),
+    s.currentUserId,
+  );
+  assert.equal(fri.summary.maxMinutes, 420);
+  assert.equal(summer.summary.maxMinutes, 420);
+  assert.equal(mon.summary.maxMinutes, 495);
+  await main.getByText('Horarios y jornada').scrollIntoViewIfNeeded();
+  await main.screenshot({ path: path.join(shots, '15-horarios.png') });
+});
+
+await step('Apariencia: paleta, fondo de pantalla, cristal y color libre', async () => {
+  await main.getByRole('button', { name: 'Configuración' }).click();
+  await main.getByRole('radio', { name: /Cálida/ }).click();
+  await main.waitForFunction(() => document.documentElement.dataset.palette === 'warm');
+  await main.getByRole('radio', { name: 'Aurora' }).click();
+  await main.locator('body > #root .app-wallpaper[data-wp="aurora"]').first().waitFor({ state: 'attached' });
+  await main.getByRole('switch', { name: 'Paneles de cristal' }).click();
+  await main.waitForFunction(() => document.documentElement.dataset.glass === 'true');
+  await main.getByLabel('Color personalizado').fill('#0f9d8a');
+  await main.waitForFunction(() => document.documentElement.dataset.accent === 'custom');
+  const s = await main.evaluate(() => window.api.settings.get());
+  assert.equal(s.customAccent, '#0f9d8a');
+  await main.evaluate(() => window.scrollTo(0, 0));
+  await main.waitForTimeout(300);
+  await main.screenshot({ path: path.join(shots, '16-apariencia.png') });
+  await main.getByRole('button', { name: 'Imputar horas', exact: true }).click();
+  await main.waitForTimeout(300);
+  await main.screenshot({ path: path.join(shots, '17-fondo-imputar.png') });
+});
 
 await step('Modo noche y color de acento', async () => {
   await main.getByRole('button', { name: 'Cambiar entre modo claro y modo noche' }).click();

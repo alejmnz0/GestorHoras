@@ -1,38 +1,33 @@
 /**
- * Configuración: usuario, jornada, recordatorios, sonido, reloj flotante, sistema y datos.
+ * Configuración: apariencia, usuario, horarios, recordatorios, sonido, reloj flotante, sistema y datos.
  * Cada cambio se guarda al momento.
  */
 import {
   AlarmClock,
+  CalendarClock,
   BellOff,
   Database,
   Download,
   FolderOpen,
-  Monitor,
   MonitorDown,
-  Moon,
   Palette,
-  Sun,
   Play,
   RotateCcw,
   Timer,
   Upload,
   UserPlus,
 } from 'lucide-react';
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useState } from 'react';
 import {
-  ACCENTS,
-  THEMES,
-  WEEKDAYS,
   MAX_REMINDER_MINUTES,
   REMINDER_PRESETS,
-  SLOT_MINUTES,
-  formatHours,
-  validateMaxDailyMinutes,
 } from '../../shared/rules';
 import type { AppInfo, FloatingPosition, ReminderStatus, Settings } from '../../shared/types';
+import { AppearanceSettings } from '../components/AppearanceSettings';
+import { ScheduleSettings } from '../components/ScheduleSettings';
+import { Row, Section } from '../components/SettingsLayout';
 import { useToast } from '../components/Toast';
-import { Button, Card, ConfirmDialog, PageHeader, Toggle, cx, inputClass } from '../components/ui';
+import { Button, ConfirmDialog, PageHeader, Toggle, cx, inputClass } from '../components/ui';
 import { api, errorMessage } from '../lib/api';
 import { useApp } from '../lib/appContext';
 import { playChime } from '../lib/sound';
@@ -94,15 +89,6 @@ export function ConfiguracionPage({ onAddUser }: { onAddUser: () => void }) {
     }
   }
 
-  function changeMaxDaily(minutes: number) {
-    try {
-      validateMaxDailyMinutes(minutes);
-      void save({ maxDailyMinutes: minutes });
-    } catch (e) {
-      toast.error('Valor no válido', errorMessage(e));
-    }
-  }
-
   const time = (ms: number) => new Date(ms).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
   const statusText = !settings.remindersEnabled
     ? 'Recordatorios desactivados.'
@@ -117,50 +103,12 @@ export function ConfiguracionPage({ onAddUser }: { onAddUser: () => void }) {
       <PageHeader title="Configuración" subtitle="Los cambios se guardan automáticamente." />
 
       <div className="space-y-5">
-        <Section title="Apariencia" description="Modo claro, modo noche o el del sistema, y el color principal." icon={<Palette className="size-4" />}>
-          <Row label="Tema">
-            <div className="flex rounded-lg bg-slate-100 p-0.5" role="radiogroup" aria-label="Tema">
-              {THEMES.map((t) => {
-                const Icon = t.value === 'light' ? Sun : t.value === 'dark' ? Moon : Monitor;
-                return (
-                  <button
-                    key={t.value}
-                    type="button"
-                    role="radio"
-                    aria-checked={settings.theme === t.value}
-                    onClick={() => save({ theme: t.value })}
-                    className={cx(
-                      'flex h-8 items-center gap-1.5 rounded-md px-3 text-[13px] font-medium transition',
-                      settings.theme === t.value ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800',
-                    )}
-                  >
-                    <Icon className="size-3.5" />
-                    {t.label}
-                  </button>
-                );
-              })}
-            </div>
-          </Row>
-          <Row label="Color de acento">
-            <div className="flex gap-2" role="radiogroup" aria-label="Color de acento">
-              {ACCENTS.map((a) => (
-                <button
-                  key={a.value}
-                  type="button"
-                  role="radio"
-                  aria-checked={settings.accent === a.value}
-                  title={a.label}
-                  aria-label={a.label}
-                  onClick={() => save({ accent: a.value })}
-                  className={cx(
-                    'size-7 rounded-full ring-offset-2 ring-offset-white transition hover:scale-110',
-                    settings.accent === a.value && 'ring-2 ring-slate-400',
-                  )}
-                  style={{ background: a.hex }}
-                />
-              ))}
-            </div>
-          </Row>
+        <Section
+          title="Apariencia"
+          description="Modo claro u oscuro, colores, paletas y fondos de pantalla."
+          icon={<Palette className="size-4" />}
+        >
+          <AppearanceSettings settings={settings} save={save} />
         </Section>
 
         <Section title="Usuario" description="Se recuerda automáticamente; no hace falta indicarlo en cada imputación.">
@@ -198,44 +146,12 @@ export function ConfiguracionPage({ onAddUser }: { onAddUser: () => void }) {
           </Row>
         </Section>
 
-        <Section title="Jornada" description="Máximo de horas imputables por trabajador y día.">
-          <Row label="Días laborables" hint="Los recordatorios y las estadísticas solo cuentan estos días">
-            <div className="flex gap-1">
-              {WEEKDAYS.map((d) => {
-                const on = settings.workDays.includes(d.value);
-                return (
-                  <button
-                    key={d.value}
-                    type="button"
-                    title={d.label}
-                    aria-pressed={on}
-                    onClick={() =>
-                      save({ workDays: on ? settings.workDays.filter((x) => x !== d.value) : [...settings.workDays, d.value] })
-                    }
-                    className={cx(
-                      'size-8 rounded-lg text-[13px] font-semibold transition',
-                      on ? 'bg-brand-600 text-on-accent' : 'bg-slate-100 text-slate-500 hover:bg-slate-200',
-                    )}
-                  >
-                    {d.short}
-                  </button>
-                );
-              })}
-            </div>
-          </Row>
-          <Row label="Horas máximas diarias" hint="Predeterminado: 8,25 h">
-            <div className="flex items-center gap-2">
-              <Button size="sm" onClick={() => changeMaxDaily(settings.maxDailyMinutes - SLOT_MINUTES)}>
-                −
-              </Button>
-              <span className="w-20 text-center text-base font-semibold tabular-nums">
-                {formatHours(settings.maxDailyMinutes)} h
-              </span>
-              <Button size="sm" onClick={() => changeMaxDaily(settings.maxDailyMinutes + SLOT_MINUTES)}>
-                +
-              </Button>
-            </div>
-          </Row>
+        <Section
+          title="Horarios y jornada"
+          description="Horas de cada día de la semana. Crea varios (normal, verano…) y los de temporada se aplican solos en sus fechas."
+          icon={<CalendarClock className="size-4" />}
+        >
+          <ScheduleSettings settings={settings} save={save} />
         </Section>
 
         <Section
@@ -459,7 +375,7 @@ export function ConfiguracionPage({ onAddUser }: { onAddUser: () => void }) {
         open={confirmReset}
         title="Restaurar valores predeterminados"
         confirmLabel="Restaurar"
-        message="Se restablecerá toda la configuración (jornada 8,25 h, recordatorios, sonido, posición del reloj…). Tus imputaciones, proyectos y usuario no se modifican."
+        message="Se restablecerá toda la configuración (apariencia, horarios —vuelve la jornada de 8,25 h—, recordatorios, sonido, posición del reloj…). Tus imputaciones, proyectos y usuario no se modifican."
         onCancel={() => setConfirmReset(false)}
         onConfirm={async () => {
           await run(() => api.settings.reset(), 'Configuración restaurada');
@@ -467,43 +383,6 @@ export function ConfiguracionPage({ onAddUser }: { onAddUser: () => void }) {
           setConfirmReset(false);
         }}
       />
-    </div>
-  );
-}
-
-function Section({
-  title,
-  description,
-  icon,
-  children,
-}: {
-  title: string;
-  description?: string;
-  icon?: ReactNode;
-  children: ReactNode;
-}) {
-  return (
-    <Card>
-      <div className="border-b border-slate-100 px-5 py-3.5">
-        <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-800">
-          {icon && <span className="text-slate-400">{icon}</span>}
-          {title}
-        </h2>
-        {description && <p className="mt-0.5 text-[13px] text-slate-500">{description}</p>}
-      </div>
-      <div className="divide-y divide-slate-100">{children}</div>
-    </Card>
-  );
-}
-
-function Row({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
-  return (
-    <div className="flex min-h-[56px] items-center justify-between gap-6 px-5 py-2.5">
-      <div>
-        <p className="text-[13px] font-medium text-slate-700">{label}</p>
-        {hint && <p className="text-xs text-slate-400">{hint}</p>}
-      </div>
-      {children}
     </div>
   );
 }

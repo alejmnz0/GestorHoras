@@ -18,7 +18,89 @@ export type AbsenceKind = 'vacation' | 'sick_leave';
 export type SharedDistribution = 'none' | 'proportional' | 'equal';
 
 export type Theme = 'system' | 'light' | 'dark';
-export type Accent = 'blue' | 'violet' | 'green' | 'orange' | 'rose';
+export type Accent =
+  | 'blue'
+  | 'violet'
+  | 'green'
+  | 'orange'
+  | 'rose'
+  | 'indigo'
+  | 'teal'
+  | 'cyan'
+  | 'amber'
+  | 'pink'
+  | 'red'
+  | 'slate'
+  | 'custom';
+/** Paleta de superficies (fondos, bordes y grises) que se combina con claro/oscuro. */
+export type Palette = 'default' | 'warm' | 'nord' | 'graphite' | 'midnight' | 'forest';
+/** Fondo de pantalla del área de trabajo. */
+export type Wallpaper =
+  | 'none'
+  | 'aurora'
+  | 'sunset'
+  | 'ocean'
+  | 'meadow'
+  | 'dots'
+  | 'grid'
+  | 'waves'
+  | 'image';
+
+/**
+ * Horario laboral: minutos de jornada para cada día de la semana.
+ * Índice 0 = domingo … 6 = sábado. 0 minutos = día no laborable.
+ */
+export interface WorkSchedule {
+  id: string;
+  name: string;
+  minutes: number[];
+  /**
+   * Periodo del año en el que se aplica solo (p. ej. verano), con fechas 'MM-DD' incluidas.
+   * Puede cruzar el fin de año (from > to). null = solo cuando es el horario principal.
+   */
+  period: { from: string; to: string } | null;
+}
+
+/** Tarea de una rutina: lo que se imputará al aplicarla. */
+export interface RoutineItem {
+  projectId: number;
+  minutes: number;
+  workType: WorkType;
+  description: string;
+}
+
+export interface Routine {
+  id: number;
+  userId: number;
+  name: string;
+  items: (RoutineItem & { projectCode: string; projectName: string; projectActive: boolean; projectKind: ProjectKind })[];
+  totalMinutes: number;
+  /** Se imputa sola cada día laborable (al abrir la app o al empezar el día). */
+  autoApply: boolean;
+  /** Última fecha (YYYY-MM-DD) en que se aplicó, o null. */
+  lastAppliedDate: string | null;
+  /** true si ya se aplicó en la fecha consultada. */
+  appliedOnDate: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RoutineInput {
+  userId: number;
+  name: string;
+  items: RoutineItem[];
+  autoApply?: boolean;
+}
+
+export interface RoutineApplyResult {
+  routineId: number;
+  date: string;
+  /** Imputaciones creadas. */
+  created: number;
+  minutes: number;
+  /** Tareas omitidas porque no cabían en la jornada o su proyecto está inactivo. */
+  skipped: { projectName: string; minutes: number; reason: 'full' | 'inactive' }[];
+}
 
 export interface User {
   id: number;
@@ -116,6 +198,10 @@ export type FloatingPosition = 'top-right' | 'bottom-right' | 'top-left' | 'bott
 
 export interface Settings {
   currentUserId: number | null;
+  /**
+   * Jornada por defecto (heredada de versiones anteriores). Con horarios configurados se
+   * mantiene sincronizada con el máximo del horario principal; usa `dayMinutesFor()` para un día concreto.
+   */
   maxDailyMinutes: number;
   remindersEnabled: boolean;
   reminderIntervalMinutes: number;
@@ -132,8 +218,22 @@ export interface Settings {
   minimizeToTray: boolean;
   theme: Theme;
   accent: Accent;
-  /** Días laborables: 0 = domingo … 6 = sábado. */
+  /** Color de acento personalizado (#rrggbb) cuando accent = 'custom'. */
+  customAccent: string;
+  palette: Palette;
+  wallpaper: Wallpaper;
+  /** Intensidad del fondo de pantalla, 10 - 100. */
+  wallpaperIntensity: number;
+  /** Paneles translúcidos (efecto cristal) sobre el fondo. */
+  glassPanels: boolean;
+  /** Fichero de la imagen de fondo propia (lo gestiona el proceso principal). */
+  wallpaperImageId: string | null;
+  /** Días laborables del horario principal: 0 = domingo … 6 = sábado (heredado). */
   workDays: number[];
+  /** Horarios configurados. Vacío = se usa maxDailyMinutes en workDays (comportamiento clásico). */
+  schedules: WorkSchedule[];
+  /** Horario principal: se aplica cuando ningún horario de temporada cubre la fecha. */
+  activeScheduleId: string | null;
 }
 
 export interface AbsenceInput {
@@ -189,6 +289,8 @@ export interface StatsResult {
   vacationDays: number;
   sickDays: number;
   workingDays: number | null;
+  /** Jornada diaria si es la misma todos los días laborables del periodo; null si varía. */
+  uniformDailyMinutes: number | null;
   expectedMinutes: number | null;
   /** % de la jornada cubierta en los días laborables ya transcurridos del periodo. */
   coveragePercent: number | null;
@@ -207,7 +309,7 @@ export interface StatsResult {
   incompleteDays: { date: string; imputedMinutes: number; pendingMinutes: number }[];
   byProject: ProjectStat[];
   byWorkType: { workType: WorkType; minutes: number; percent: number }[];
-  byDay: { date: string; minutes: number; workday: boolean }[];
+  byDay: { date: string; minutes: number; workday: boolean; expectedMinutes: number }[];
 }
 
 export interface ReminderStatus {

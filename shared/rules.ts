@@ -2,7 +2,7 @@
  * Reglas de negocio y utilidades puras. Se usan en el backend (validación definitiva)
  * y en la interfaz (validación inmediata), de modo que ambas capas aplican lo mismo.
  */
-import type { Accent, ProjectKind, Settings, Theme, WorkType } from './types';
+import type { Accent, Palette, ProjectKind, RoutineItem, Settings, Theme, Wallpaper, WorkSchedule, WorkType } from './types';
 
 export const SLOT_MINUTES = 15;
 export const DEFAULT_MAX_DAILY_MINUTES = 495; // 8,25 h
@@ -59,13 +59,44 @@ export const THEMES: { value: Theme; label: string }[] = [
   { value: 'system', label: 'Sistema' },
 ];
 
-export const ACCENTS: { value: Accent; label: string; hex: string }[] = [
+export const ACCENTS: { value: Exclude<Accent, 'custom'>; label: string; hex: string }[] = [
   { value: 'blue', label: 'Azul', hex: '#2563eb' },
+  { value: 'indigo', label: 'Índigo', hex: '#4f46e5' },
   { value: 'violet', label: 'Violeta', hex: '#7c3aed' },
-  { value: 'green', label: 'Verde', hex: '#059669' },
-  { value: 'orange', label: 'Naranja', hex: '#ea580c' },
+  { value: 'pink', label: 'Fucsia', hex: '#db2777' },
   { value: 'rose', label: 'Rosa', hex: '#e11d48' },
+  { value: 'red', label: 'Rojo', hex: '#dc2626' },
+  { value: 'orange', label: 'Naranja', hex: '#ea580c' },
+  { value: 'amber', label: 'Ámbar', hex: '#d97706' },
+  { value: 'green', label: 'Verde', hex: '#059669' },
+  { value: 'teal', label: 'Turquesa', hex: '#0d9488' },
+  { value: 'cyan', label: 'Cian', hex: '#0891b2' },
+  { value: 'slate', label: 'Pizarra', hex: '#475569' },
 ];
+export const DEFAULT_CUSTOM_ACCENT = '#8b5cf6';
+
+/** Paletas de superficies. `light`/`dark`: [fondo de la app, paneles] para la vista previa. */
+export const PALETTES: { value: Palette; label: string; hint: string; light: [string, string]; dark: [string, string] }[] = [
+  { value: 'default', label: 'Clásica', hint: 'Grises azulados', light: ['#f6f7f9', '#ffffff'], dark: ['#0b1120', '#131b2d'] },
+  { value: 'warm', label: 'Cálida', hint: 'Crema y sepia', light: ['#f7f3ec', '#fffdf8'], dark: ['#171310', '#211b16'] },
+  { value: 'nord', label: 'Nórdica', hint: 'Azules fríos', light: ['#e5e9f0', '#f4f6f9'], dark: ['#242933', '#2e3440'] },
+  { value: 'forest', label: 'Bosque', hint: 'Verdes naturales', light: ['#eef3ee', '#fbfdfb'], dark: ['#0e1510', '#151f18'] },
+  { value: 'graphite', label: 'Grafito', hint: 'Grises neutros', light: ['#f4f4f5', '#ffffff'], dark: ['#0f0f11', '#18181b'] },
+  { value: 'midnight', label: 'Contraste', hint: 'Negro puro de noche', light: ['#ffffff', '#ffffff'], dark: ['#000000', '#0a0a0a'] },
+];
+
+export const WALLPAPERS: { value: Wallpaper; label: string }[] = [
+  { value: 'none', label: 'Sin fondo' },
+  { value: 'aurora', label: 'Aurora' },
+  { value: 'sunset', label: 'Atardecer' },
+  { value: 'ocean', label: 'Océano' },
+  { value: 'meadow', label: 'Pradera' },
+  { value: 'dots', label: 'Puntos' },
+  { value: 'grid', label: 'Cuadrícula' },
+  { value: 'waves', label: 'Ondas' },
+  { value: 'image', label: 'Mi imagen' },
+];
+export const WALLPAPER_MAX_BYTES = 8 * 1024 * 1024;
 
 export const WEEKDAYS = [
   { value: 1, short: 'L', label: 'Lunes' },
@@ -129,6 +160,208 @@ export function dateRange(from: string, to: string, limit = 3700): string[] {
   return out;
 }
 
+// ---------------------------------------------------------------------------
+// Horarios
+// ---------------------------------------------------------------------------
+
+export const LEGACY_SCHEDULE_ID = 'normal';
+export const MAX_SCHEDULES = 8;
+export const SCHEDULE_NAME_MAX_LENGTH = 40;
+
+type ScheduleSettings = Pick<Settings, 'schedules' | 'activeScheduleId' | 'maxDailyMinutes' | 'workDays'>;
+
+/** Horario equivalente a la configuración clásica (misma jornada en todos los días laborables). */
+export function legacySchedule(maxDailyMinutes: number, workDays: number[]): WorkSchedule {
+  return {
+    id: LEGACY_SCHEDULE_ID,
+    name: 'Horario normal',
+    minutes: [0, 1, 2, 3, 4, 5, 6].map((d) => (workDays.includes(d) ? maxDailyMinutes : 0)),
+    period: null,
+  };
+}
+
+/** Plantillas para crear horarios con un clic desde Configuración. */
+export const SCHEDULE_TEMPLATES: { key: string; label: string; make: () => Omit<WorkSchedule, 'id'> }[] = [
+  {
+    key: 'normal',
+    label: 'Normal: L-J 8,25 h · V 7 h',
+    make: () => ({ name: 'Horario normal', minutes: [0, 495, 495, 495, 495, 420, 0], period: null }),
+  },
+  {
+    key: 'summer',
+    label: 'Verano: L-V 7 h (15/06 - 15/09)',
+    make: () => ({
+      name: 'Horario de verano',
+      minutes: [0, 420, 420, 420, 420, 420, 0],
+      period: { from: '06-15', to: '09-15' },
+    }),
+  },
+  {
+    key: 'intensive',
+    label: 'Intensiva: L-V 7 h',
+    make: () => ({ name: 'Jornada intensiva', minutes: [0, 420, 420, 420, 420, 420, 0], period: null }),
+  },
+  {
+    key: 'part',
+    label: 'Media jornada: L-V 4 h',
+    make: () => ({ name: 'Media jornada', minutes: [0, 240, 240, 240, 240, 240, 0], period: null }),
+  },
+];
+
+/** 'MM-DD' válido (admite 02-29). */
+export function isValidMonthDay(v: unknown): v is string {
+  if (typeof v !== 'string' || !/^\d{2}-\d{2}$/.test(v)) return false;
+  const [m, d] = v.split('-').map(Number);
+  if (m < 1 || m > 12 || d < 1) return false;
+  return d <= [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][m - 1];
+}
+
+/** ¿La fecha cae dentro del periodo anual? Admite periodos que cruzan el fin de año (p. ej. 12-15 → 01-10). */
+export function inPeriod(iso: string, period: { from: string; to: string }): boolean {
+  const md = iso.slice(5);
+  return period.from <= period.to ? md >= period.from && md <= period.to : md >= period.from || md <= period.to;
+}
+
+/** Horarios efectivos: los configurados o, si no hay ninguno, el equivalente clásico. */
+export function schedulesOf(s: ScheduleSettings): WorkSchedule[] {
+  return s.schedules?.length ? s.schedules : [legacySchedule(s.maxDailyMinutes, s.workDays)];
+}
+
+/** Horario principal: el que rige fuera de los periodos de temporada. */
+export function activeSchedule(s: ScheduleSettings): WorkSchedule {
+  const list = schedulesOf(s);
+  return list.find((x) => x.id === s.activeScheduleId) ?? list.find((x) => !x.period) ?? list[0];
+}
+
+/**
+ * Horario que rige una fecha: el primer horario de temporada (distinto del principal) cuyo
+ * periodo incluya la fecha o, si no hay, el horario principal.
+ */
+export function scheduleFor(date: string, s: ScheduleSettings): WorkSchedule {
+  const main = activeSchedule(s);
+  return schedulesOf(s).find((x) => x.id !== main.id && x.period && inPeriod(date, x.period)) ?? main;
+}
+
+/** Jornada esperada en una fecha (0 si no es laborable). */
+export function expectedMinutesFor(date: string, s: ScheduleSettings): number {
+  return scheduleFor(date, s).minutes[weekdayOf(date)] ?? 0;
+}
+
+/** ¿Es laborable según el horario que rige ese día? */
+export function isWorkdayFor(date: string, s: ScheduleSettings): boolean {
+  return expectedMinutesFor(date, s) > 0;
+}
+
+/**
+ * Máximo imputable en una fecha: la jornada de ese día o, en días no laborables (por si se
+ * trabaja un sábado), la jornada más larga de ese horario.
+ */
+export function dayLimitFor(date: string, s: ScheduleSettings): number {
+  const sch = scheduleFor(date, s);
+  const m = sch.minutes[weekdayOf(date)] ?? 0;
+  return m > 0 ? m : Math.max(SLOT_MINUTES, ...sch.minutes);
+}
+
+/** Resumen corto de un horario: "L-J 8,25 h · V 7 h". */
+export function describeSchedule(sch: WorkSchedule): string {
+  const groups: { days: string[]; minutes: number; lastIdx: number }[] = [];
+  WEEKDAYS.forEach((d, idx) => {
+    const m = sch.minutes[d.value] ?? 0;
+    if (m === 0) return;
+    const last = groups.at(-1);
+    if (last && last.minutes === m && last.lastIdx === idx - 1) {
+      last.days.push(d.short);
+      last.lastIdx = idx;
+    } else groups.push({ days: [d.short], minutes: m, lastIdx: idx });
+  });
+  if (!groups.length) return 'Sin días laborables';
+  return groups
+    .map((g) => `${g.days.length > 2 ? `${g.days[0]}-${g.days.at(-1)}` : g.days.join(', ')} ${formatHours(g.minutes)} h`)
+    .join(' · ');
+}
+
+/** "06-15" → "15/06" */
+export function formatMonthDay(md: string): string {
+  const [m, d] = md.split('-');
+  return `${d}/${m}`;
+}
+
+export function validateSchedules(v: unknown): WorkSchedule[] {
+  if (!Array.isArray(v)) throw new ValidationError('Horarios no válidos.');
+  if (v.length === 0) throw new ValidationError('Debe haber al menos un horario.');
+  if (v.length > MAX_SCHEDULES) throw new ValidationError(`No puede haber más de ${MAX_SCHEDULES} horarios.`);
+  const ids = new Set<string>();
+  return v.map((raw: unknown) => {
+    const x = (raw ?? {}) as Record<string, unknown>;
+    const id = typeof x.id === 'string' ? x.id.trim() : '';
+    if (!/^[\w-]{1,40}$/.test(id) || ids.has(id)) throw new ValidationError('Identificador de horario no válido.');
+    ids.add(id);
+    const name = typeof x.name === 'string' ? x.name.trim().replace(/\s+/g, ' ') : '';
+    if (!name) throw new ValidationError('Cada horario necesita un nombre.');
+    if (name.length > SCHEDULE_NAME_MAX_LENGTH) {
+      throw new ValidationError(`El nombre del horario no puede superar los ${SCHEDULE_NAME_MAX_LENGTH} caracteres.`);
+    }
+    const minutes = x.minutes;
+    if (
+      !Array.isArray(minutes) ||
+      minutes.length !== 7 ||
+      minutes.some(
+        (m) => !Number.isInteger(m) || m < 0 || m % SLOT_MINUTES !== 0 || m > MAX_CONFIGURABLE_DAILY_MINUTES,
+      )
+    ) {
+      throw new ValidationError(`Las horas del horario «${name}» deben ser múltiplos de 0,25 h entre 0 y 24 h.`);
+    }
+    if (minutes.every((m) => m === 0)) {
+      throw new ValidationError(`El horario «${name}» necesita al menos un día laborable.`);
+    }
+    let period: WorkSchedule['period'] = null;
+    if (x.period !== null && x.period !== undefined) {
+      const p = x.period as Record<string, unknown>;
+      if (!isValidMonthDay(p.from) || !isValidMonthDay(p.to)) {
+        throw new ValidationError(`Las fechas del periodo de «${name}» no son válidas.`);
+      }
+      period = { from: p.from, to: p.to };
+    }
+    return { id, name, minutes: [...(minutes as number[])], period };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Rutinas
+// ---------------------------------------------------------------------------
+
+export const ROUTINE_NAME_MAX_LENGTH = 60;
+export const ROUTINE_MAX_ITEMS = 20;
+
+export function validateRoutineName(v: unknown): string {
+  const t = typeof v === 'string' ? v.trim().replace(/\s+/g, ' ') : '';
+  if (!t) throw new ValidationError('La rutina necesita un nombre.');
+  if (t.length > ROUTINE_NAME_MAX_LENGTH) {
+    throw new ValidationError(`El nombre de la rutina no puede superar los ${ROUTINE_NAME_MAX_LENGTH} caracteres.`);
+  }
+  return t;
+}
+
+/** Valida las tareas de una rutina (los proyectos los comprueba el backend). */
+export function validateRoutineItems(v: unknown): RoutineItem[] {
+  if (!Array.isArray(v) || v.length === 0) throw new ValidationError('Añade al menos una tarea a la rutina.');
+  if (v.length > ROUTINE_MAX_ITEMS) {
+    throw new ValidationError(`Una rutina admite como máximo ${ROUTINE_MAX_ITEMS} tareas.`);
+  }
+  return v.map((raw: unknown, i) => {
+    const x = (raw ?? {}) as Record<string, unknown>;
+    if (!Number.isInteger(x.projectId)) throw new ValidationError(`Elige el proyecto de la tarea ${i + 1}.`);
+    const minutes = validateEntryMinutes(x.minutes);
+    if (!isWorkType(x.workType)) throw new ValidationError(`Elige el tipo de trabajo de la tarea ${i + 1}.`);
+    return {
+      projectId: x.projectId as number,
+      minutes,
+      workType: x.workType,
+      description: validateDescription(x.description),
+    };
+  });
+}
+
 export const DEFAULT_SETTINGS: Settings = {
   currentUserId: null,
   maxDailyMinutes: DEFAULT_MAX_DAILY_MINUTES,
@@ -145,7 +378,15 @@ export const DEFAULT_SETTINGS: Settings = {
   minimizeToTray: true,
   theme: 'system',
   accent: 'blue',
+  customAccent: DEFAULT_CUSTOM_ACCENT,
+  palette: 'default',
+  wallpaper: 'none',
+  wallpaperIntensity: 60,
+  glassPanels: false,
+  wallpaperImageId: null,
   workDays: [1, 2, 3, 4, 5],
+  schedules: [],
+  activeScheduleId: null,
 };
 
 /** Error de validación: su mensaje se muestra tal cual al usuario. */
@@ -365,8 +606,36 @@ export function validateSettingsPatch(patch: Record<string, unknown>): Partial<S
     out.theme = patch.theme as Theme;
   }
   if ('accent' in patch) {
-    if (!ACCENTS.some((a) => a.value === patch.accent)) throw new ValidationError('Color de acento no válido.');
+    if (patch.accent !== 'custom' && !ACCENTS.some((a) => a.value === patch.accent)) {
+      throw new ValidationError('Color de acento no válido.');
+    }
     out.accent = patch.accent as Accent;
+  }
+  if ('customAccent' in patch) {
+    const v = patch.customAccent;
+    if (typeof v !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(v)) throw new ValidationError('Color personalizado no válido.');
+    out.customAccent = v.toLowerCase();
+  }
+  if ('palette' in patch) {
+    if (!PALETTES.some((p) => p.value === patch.palette)) throw new ValidationError('Paleta no válida.');
+    out.palette = patch.palette as Palette;
+  }
+  if ('wallpaper' in patch) {
+    if (!WALLPAPERS.some((w) => w.value === patch.wallpaper)) throw new ValidationError('Fondo de pantalla no válido.');
+    out.wallpaper = patch.wallpaper as Wallpaper;
+  }
+  if ('wallpaperIntensity' in patch) {
+    const v = patch.wallpaperIntensity;
+    if (typeof v !== 'number' || !Number.isFinite(v) || v < 10 || v > 100) {
+      throw new ValidationError('La intensidad del fondo debe estar entre 10 y 100.');
+    }
+    out.wallpaperIntensity = Math.round(v);
+  }
+  if ('schedules' in patch) out.schedules = validateSchedules(patch.schedules);
+  if ('activeScheduleId' in patch) {
+    const v = patch.activeScheduleId;
+    if (v !== null && (typeof v !== 'string' || !v)) throw new ValidationError('Horario no válido.');
+    out.activeScheduleId = v as string | null;
   }
   if ('workDays' in patch) {
     const v = patch.workDays;
@@ -382,5 +651,6 @@ export function validateSettingsPatch(patch: Record<string, unknown>): Partial<S
   bool('animationEnabled');
   bool('autoStart');
   bool('minimizeToTray');
+  bool('glassPanels');
   return out;
 }

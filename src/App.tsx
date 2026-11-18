@@ -3,9 +3,11 @@
  */
 import { CalendarClock, FolderKanban, History, Moon, Settings as SettingsIcon, Sun, UserRound } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { formatHours } from '../shared/rules';
 import type { Settings, User } from '../shared/types';
 import { useToast } from './components/Toast';
 import { Button, Field, Modal, cx, inputClass } from './components/ui';
+import { Wallpaper } from './components/Wallpaper';
 import { api, errorMessage } from './lib/api';
 import { AppContext, type AppState } from './lib/appContext';
 import { playChime } from './lib/sound';
@@ -71,6 +73,13 @@ export function App() {
           if (list.length === 0) setUserDialog('first');
         });
       }),
+      api.on.routinesAutoApplied((list) => {
+        const minutes = list.reduce((s, r) => s + r.minutes, 0);
+        toast.success(
+          list.length === 1 ? `Rutina «${list[0].name}» imputada` : `${list.length} rutinas imputadas`,
+          `Se han imputado ${formatHours(minutes)} h automáticamente para hoy.`,
+        );
+      }),
       api.on.reminder((a) => {
         if (a.sound) playChime(a.volume);
         toast.show('reminder', 'Es hora de imputar tus horas', 'Registra el tiempo dedicado a tus proyectos.', 8000);
@@ -124,8 +133,9 @@ export function App() {
 
   return (
     <AppContext.Provider value={state}>
-      <div className="flex h-full">
-        <aside className="flex w-60 shrink-0 flex-col border-r border-slate-200/80 bg-white">
+      <Wallpaper settings={settings} />
+      <div className="relative z-[1] flex h-full">
+        <aside className="glass flex w-60 shrink-0 flex-col border-r border-slate-200/80 bg-white">
           <div className="flex items-center gap-2.5 px-5 pt-5 pb-6">
             <img src="./icon.png" alt="" className="size-8 rounded-lg" />
             <div className="min-w-0 flex-1">

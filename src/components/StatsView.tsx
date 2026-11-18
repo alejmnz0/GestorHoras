@@ -88,7 +88,9 @@ export function StatsView({
           value={s.expectedMinutes !== null ? `${formatHours(s.expectedMinutes)} h` : '—'}
           sub={
             s.workingDays !== null
-              ? `${s.workingDays} días laborables × ${formatHours(maxDailyMinutes)} h`
+              ? s.uniformDailyMinutes !== null
+                ? `${s.workingDays} días laborables × ${formatHours(s.uniformDailyMinutes)} h`
+                : `${s.workingDays} días laborables según tus horarios`
               : 'Filtra por un usuario y un periodo'
           }
         />
@@ -364,31 +366,46 @@ export function StatsView({
 }
 
 function DailyChart({ days, maxDaily, truncated }: { days: StatsResult['byDay']; maxDaily: number; truncated: boolean }) {
-  const top = Math.max(maxDaily, ...days.map((d) => d.minutes));
+  const targets = new Set(days.filter((d) => d.expectedMinutes > 0).map((d) => d.expectedMinutes));
+  // Con una sola jornada se dibuja una línea; si varía (verano, viernes…), una marca en cada día.
+  const uniform = targets.size <= 1 ? ([...targets][0] ?? maxDaily) : null;
+  const top = Math.max(uniform ?? 0, ...days.map((d) => Math.max(d.minutes, d.expectedMinutes)));
   const H = 140;
   const every = Math.max(1, Math.ceil(days.length / 12));
   return (
     <Card>
       <CardTitle
         title="Evolución diaria"
-        hint={`${truncated ? 'Últimos 92 días · ' : ''}La línea marca la jornada de ${formatHours(maxDaily)} h`}
+        hint={`${truncated ? 'Últimos 92 días · ' : ''}${
+          uniform !== null ? `La línea marca la jornada de ${formatHours(uniform)} h` : 'Las marcas indican la jornada de cada día'
+        }`}
       />
       <div className="px-5 pb-4">
         <div className="relative flex items-end gap-[2px]" style={{ height: H }}>
-          <div
-            className="pointer-events-none absolute inset-x-0 border-t border-dashed border-slate-300"
-            style={{ bottom: (maxDaily / top) * H }}
-          />
+          {uniform !== null && (
+            <div
+              className="pointer-events-none absolute inset-x-0 border-t border-dashed border-slate-300"
+              style={{ bottom: (uniform / top) * H }}
+            />
+          )}
           {days.map((d) => (
             <div
               key={d.date}
               className="group relative flex h-full flex-1 items-end"
-              title={`${formatDate(d.date)}: ${formatHours(d.minutes)} h${d.workday ? '' : ' (no laborable)'}`}
+              title={`${formatDate(d.date)}: ${formatHours(d.minutes)} h${
+                d.workday ? ` de ${formatHours(d.expectedMinutes)} h` : ' (no laborable)'
+              }`}
             >
+              {uniform === null && d.expectedMinutes > 0 && (
+                <div
+                  className="pointer-events-none absolute inset-x-0 border-t-2 border-slate-400/70"
+                  style={{ bottom: (d.expectedMinutes / top) * H }}
+                />
+              )}
               <div
                 className={cx(
                   'w-full rounded-t-[4px] transition-colors',
-                  d.minutes >= maxDaily ? 'bg-emerald-500' : d.workday ? 'bg-brand-500' : 'bg-slate-300',
+                  d.minutes >= (d.expectedMinutes || uniform || maxDaily) ? 'bg-emerald-500' : d.workday ? 'bg-brand-500' : 'bg-slate-300',
                   'group-hover:opacity-80',
                 )}
                 style={{ height: d.minutes ? Math.max(2, (d.minutes / top) * H) : 0 }}

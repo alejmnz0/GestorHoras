@@ -3,7 +3,7 @@
  * Cada día se completa con lo pendiente, o con las horas indicadas (medias jornadas).
  */
 import { useEffect, useMemo, useState } from 'react';
-import { PROJECT_KINDS, dateRange, isAbsenceKind, formatDate, formatHours, isValidIsoDate, isWorkday } from '../../shared/rules';
+import { PROJECT_KINDS, dateRange, isAbsenceKind, formatDate, formatHours, isValidIsoDate, isWorkdayFor, activeSchedule } from '../../shared/rules';
 import type { AbsenceKind, Project } from '../../shared/types';
 import { api, errorMessage } from '../lib/api';
 import { useApp } from '../lib/appContext';
@@ -46,8 +46,8 @@ export function AbsenceModal({
   const project = special.find((p) => p.kind === kind);
   const workingDays = useMemo(() => {
     if (!isValidIsoDate(from) || !isValidIsoDate(to) || to < from) return 0;
-    return dateRange(from, to, 367).filter((d) => isWorkday(d, settings.workDays)).length;
-  }, [from, to, settings.workDays]);
+    return dateRange(from, to, 367).filter((d) => isWorkdayFor(d, settings)).length;
+  }, [from, to, settings]);
 
   async function save() {
     setSaving(true);
@@ -143,14 +143,14 @@ export function AbsenceModal({
           <div>
             <p className="text-[13px] font-medium text-slate-700">Jornada completa</p>
             <p className="text-xs text-slate-500">
-              Completa lo que falte de cada día (hasta {formatHours(settings.maxDailyMinutes)} h).
+              Completa lo que falte de cada día según tu horario (p. ej. hasta {formatHours(Math.max(...activeSchedule(settings).minutes))} h).
             </p>
           </div>
           <Toggle checked={fullDay} onChange={setFullDay} label="Jornada completa" />
         </div>
         {!fullDay && (
           <Field label="Horas por día" group hint="Para medias jornadas">
-            <HoursPicker value={minutes} onChange={setMinutes} max={settings.maxDailyMinutes} />
+            <HoursPicker value={minutes} onChange={setMinutes} max={Math.max(...activeSchedule(settings).minutes)} />
           </Field>
         )}
 

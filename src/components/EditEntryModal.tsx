@@ -3,6 +3,7 @@
  * Calcula el disponible del día descontando el valor anterior del propio registro.
  */
 import { useEffect, useState } from 'react';
+import { dayLimitFor } from '../../shared/rules';
 import type { Project, TimeEntry } from '../../shared/types';
 import { api } from '../lib/api';
 import { useApp } from '../lib/appContext';
@@ -50,7 +51,7 @@ export function EditEntryModal({ entry, onClose }: { entry: TimeEntry | null; on
           onChange={setValues}
           users={users}
           projects={projects}
-          maxMinutes={settings.maxDailyMinutes}
+          maxMinutes={dayLimitFor(values.date, settings)}
           usedMinutes={used}
           onCancel={onClose}
           onSubmit={async (input) => {

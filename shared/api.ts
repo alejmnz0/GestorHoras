@@ -15,6 +15,9 @@ import type {
   HistoryResult,
   Project,
   ProjectInput,
+  Routine,
+  RoutineApplyResult,
+  RoutineInput,
   ReminderAlert,
   ReminderStatus,
   Settings,
@@ -55,6 +58,20 @@ export interface Api {
     /** Devuelve la ruta del fichero guardado o null si se canceló. */
     exportHistory(filter: HistoryFilter, format: 'xlsx' | 'csv'): Promise<string | null>;
   };
+  routines: {
+    /** Rutinas del usuario; `date` indica para qué día se calcula «ya aplicada». */
+    list(userId: number, date: string): Promise<Routine[]>;
+    create(input: RoutineInput): Promise<Routine>;
+    update(id: number, input: RoutineInput): Promise<Routine>;
+    remove(id: number): Promise<void>;
+    apply(id: number, date: string): Promise<RoutineApplyResult>;
+  };
+  appearance: {
+    /** Abre un selector de imagen y la guarda como fondo. true si se eligió una. */
+    pickWallpaper(): Promise<boolean>;
+    /** Imagen de fondo propia como data URL, o null. */
+    wallpaperImage(): Promise<string | null>;
+  };
   settings: {
     get(): Promise<Settings>;
     update(patch: Partial<Settings>): Promise<Settings>;
@@ -90,5 +107,6 @@ export interface Api {
     reminder(cb: (a: ReminderAlert) => void): () => void;
     reminderStatus(cb: (s: ReminderStatus) => void): () => void;
     floatingShown(cb: () => void): () => void;
+    routinesAutoApplied(cb: (r: (RoutineApplyResult & { name: string })[]) => void): () => void;
   };
 }

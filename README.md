@@ -38,6 +38,31 @@ Aplicación de escritorio para **Windows y Linux**, **ligera, privada y 100 % lo
 
 <img src="docs/screenshots/imputar.png" alt="Pantalla de imputación de horas" width="100%" />
 
+## 🆕 Novedades v1.4
+
+<table>
+<tr>
+<td width="33%" valign="top">
+
+### 🔁 Rutinas
+¿Haces las mismas tareas cada mañana? Guárdalas como una **rutina** (proyecto, tipo, horas y descripción de cada tarea) y en **Imputar horas** pulsa **Imputar** para registrarlas todas de golpe. También puedes crearla desde las tareas de un día con **«Guardar las tareas de este día como rutina»**. Si activas ⚡ **Imputar automáticamente**, se registra sola una vez cada día laborable al abrir la app (nunca en fines de semana ni en días con vacaciones o baja). Si no cabe entera en la jornada, se imputa lo que quepa.
+
+</td>
+<td width="33%" valign="top">
+
+### 🗓️ Horarios
+En **Configuración → Horarios y jornada** defines las horas de **cada día de la semana** (p. ej. L-J 8,25 h y V 7 h) y puedes tener varios horarios: el **principal** y los de **temporada**, que se aplican solos en su periodo (p. ej. **verano** del 15/06 al 15/09, L-V 7 h). El límite diario, las ausencias, los recordatorios y las estadísticas usan la jornada de cada día.
+
+</td>
+<td width="33%" valign="top">
+
+### 🎨 Más personalización
+**12 colores** de acento más uno **libre** con selector, **6 paletas** (Clásica, Cálida, Nórdica, Bosque, Grafito y Contraste/negro puro), **fondos de pantalla** (Aurora, Atardecer, Océano, Pradera, Puntos, Cuadrícula, Ondas o **tu propia imagen**), intensidad del fondo y **paneles de cristal**.
+
+</td>
+</tr>
+</table>
+
 ## 🌐 Novedad v1.2: tareas comunes a todos los proyectos
 
 ¿Una reunión de equipo, una actualización de una librería compartida o una formación que afecta a **todos** los proyectos? Impútala **una sola vez** al proyecto especial **🌐 Todos los proyectos** y decide después, en las estadísticas, cómo verla.

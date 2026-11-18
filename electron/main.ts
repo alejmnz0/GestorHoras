@@ -29,7 +29,7 @@ import { initLogger, log } from './logger';
 import { ReminderScheduler, endOfToday } from './reminders';
 import { circleShape } from './shape';
 import { Repo } from './repo';
-import { ValidationError, isWorkday, todayIso } from '../shared/rules';
+import { ValidationError, WALLPAPER_MAX_BYTES, isWorkdayFor, todayIso } from '../shared/rules';
 import type {
   AbsenceInput,
   EntryInput,
@@ -37,6 +37,7 @@ import type {
   IpcResult,
   ProjectInput,
   ReminderAlert,
+  RoutineInput,
   Settings,
   SharedDistribution,
 } from '../shared/types';
@@ -120,6 +121,7 @@ async function init() {
   // (la aplicación puede pasar días abierta en la bandeja).
   setInterval(() => {
     if (store.dirty) store.safePersist();
+    runAutoRoutines();
     try {
       autoBackup(dbPath, backupDir, todayIso());
     } catch (e) {
@@ -135,7 +137,7 @@ async function init() {
     shouldSkip: () => {
       const s = repo.getSettings();
       // Nunca se avisa en días no laborables (fines de semana por defecto).
-      if (!isWorkday(todayIso(), s.workDays)) return true;
+      if (!isWorkdayFor(todayIso(), s)) return true;
       if (!s.skipRemindersWhenComplete || !s.currentUserId) return false;
       return repo.daySummary(s.currentUserId, todayIso()).complete;
     },
@@ -150,8 +152,32 @@ async function init() {
   applyAutoStart(repo.getSettings().autoStart);
   scheduler.restart();
 
-  powerMonitor.on('resume', () => scheduler.tick());
-  powerMonitor.on('unlock-screen', () => scheduler.tick());
+  powerMonitor.on('resume', () => {
+    runAutoRoutines();
+    scheduler.tick();
+  });
+  powerMonitor.on('unlock-screen', () => {
+    runAutoRoutines();
+    scheduler.tick();
+  });
+  // Rutinas automáticas: al arrancar (con margen para que cargue la interfaz y vea el aviso).
+  setTimeout(runAutoRoutines, 4000);
+}
+
+/** Imputa las rutinas automáticas de hoy (una vez al día) y avisa a la interfaz. */
+function runAutoRoutines() {
+  try {
+    const s = repo.getSettings();
+    if (!s.currentUserId) return;
+    const applied = repo.autoApplyRoutines(s.currentUserId, todayIso());
+    if (applied.length) {
+      log.info(`Rutinas automáticas aplicadas: ${applied.map((a) => a.name).join(', ')}`);
+      broadcast('data:changed');
+      broadcast('routines:autoApplied', applied);
+    }
+  } catch (e) {
+    log.error('No se pudieron aplicar las rutinas automáticas', e);
+  }
 }
 
 app.on('before-quit', () => {
@@ -508,9 +534,15 @@ function afterSettingsChanged(before: Settings, after: Settings) {
     floatingWindow.setPosition(p.x, p.y);
   }
   broadcast('settings:changed', after);
-  if (before.maxDailyMinutes !== after.maxDailyMinutes || before.currentUserId !== after.currentUserId) {
+  if (
+    before.maxDailyMinutes !== after.maxDailyMinutes ||
+    before.currentUserId !== after.currentUserId ||
+    before.activeScheduleId !== after.activeScheduleId ||
+    JSON.stringify(before.schedules) !== JSON.stringify(after.schedules)
+  ) {
     broadcast('data:changed');
   }
+  if (before.currentUserId !== after.currentUserId) runAutoRoutines();
 }
 
 function updateSettings(patch: Partial<Settings>): Settings {
@@ -523,6 +555,17 @@ function updateSettings(patch: Partial<Settings>): Settings {
 // ---------------------------------------------------------------------------
 // IPC
 // ---------------------------------------------------------------------------
+
+const WALLPAPER_EXT: Record<string, string> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  webp: 'image/webp',
+  gif: 'image/gif',
+};
+function wallpaperDir(): string {
+  return path.join(app.getPath('userData'), 'fondo');
+}
 
 function broadcast(channel: string, ...args: unknown[]) {
   for (const w of BrowserWindow.getAllWindows()) {
@@ -649,6 +692,48 @@ function registerIpc() {
     return scheduler.status();
   });
   handle('reminders:test', () => fireReminder());
+
+  // Rutinas
+  handle('routines:list', (userId: number, date: string) => repo.listRoutines(userId, date || todayIso()));
+  handle('routines:create', (input: RoutineInput) => repo.createRoutine(input), true);
+  handle('routines:update', (id: number, input: RoutineInput) => repo.updateRoutine(id, input), true);
+  handle('routines:remove', (id: number) => repo.deleteRoutine(id), true);
+  handle('routines:apply', (id: number, date: string) => repo.applyRoutine(id, date), true);
+
+  // Fondo de pantalla propio: se copia a la carpeta de datos y se sirve como data URL.
+  handle('appearance:pickWallpaper', async () => {
+    const parent = parentWindow();
+    const opts: Electron.OpenDialogOptions = {
+      title: 'Elegir imagen de fondo',
+      properties: ['openFile'],
+      filters: [{ name: 'Imágenes', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] }],
+    };
+    const res = parent ? await dialog.showOpenDialog(parent, opts) : await dialog.showOpenDialog(opts);
+    const file = res.filePaths[0];
+    if (res.canceled || !file) return false;
+    const ext = path.extname(file).toLowerCase().replace('.', '');
+    if (!WALLPAPER_EXT[ext]) throw new ValidationError('Formato de imagen no admitido (usa PNG, JPG, WEBP o GIF).');
+    if (fs.statSync(file).size > WALLPAPER_MAX_BYTES) {
+      throw new ValidationError('La imagen es demasiado grande (máximo 8 MB).');
+    }
+    fs.mkdirSync(wallpaperDir(), { recursive: true });
+    const id = `fondo-${Date.now()}.${ext}`;
+    fs.copyFileSync(file, path.join(wallpaperDir(), id));
+    // Se borran las imágenes anteriores.
+    for (const f of fs.readdirSync(wallpaperDir())) if (f !== id) fs.rmSync(path.join(wallpaperDir(), f), { force: true });
+    repo.setInternalSetting('wallpaperImageId', id);
+    // updateSettings difunde la configuración nueva (con la imagen) a todas las ventanas.
+    updateSettings({ wallpaper: 'image' });
+    return true;
+  });
+  handle('appearance:wallpaperImage', () => {
+    const id = repo.getSettings().wallpaperImageId;
+    if (!id || !/^fondo-\d+\.(png|jpe?g|webp|gif)$/.test(id)) return null;
+    const file = path.join(wallpaperDir(), id);
+    if (!fs.existsSync(file)) return null;
+    const ext = path.extname(id).slice(1);
+    return `data:${WALLPAPER_EXT[ext]};base64,${fs.readFileSync(file).toString('base64')}`;
+  });
 
   // Copias de seguridad
   handle('backup:export', async () => {

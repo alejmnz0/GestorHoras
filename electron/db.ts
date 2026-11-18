@@ -106,6 +106,37 @@ export const MIGRATIONS: string[] = [
   ALTER TABLE projects_v3 RENAME TO projects;
   CREATE UNIQUE INDEX idx_projects_special_kind ON projects(kind) WHERE kind <> 'normal';
   `,
+  // v4: rutinas (grupos de tareas que se imputan de una vez) y registro de cuándo se aplicaron.
+  `
+  CREATE TABLE routines (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name        TEXT    NOT NULL CHECK (length(trim(name)) > 0),
+    auto_apply  INTEGER NOT NULL DEFAULT 0 CHECK (auto_apply IN (0, 1)),
+    created_at  TEXT    NOT NULL,
+    updated_at  TEXT    NOT NULL
+  );
+  CREATE INDEX idx_routines_user ON routines(user_id);
+
+  CREATE TABLE routine_items (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    routine_id  INTEGER NOT NULL REFERENCES routines(id) ON DELETE CASCADE,
+    project_id  INTEGER NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+    position    INTEGER NOT NULL,
+    minutes     INTEGER NOT NULL CHECK (minutes >= 15 AND minutes % 15 = 0 AND minutes <= 1440),
+    work_type   TEXT    NOT NULL CHECK (work_type IN ('incidencia', 'desarrollo', 'mantenimiento', 'ausencia')),
+    description TEXT    NOT NULL DEFAULT '' CHECK (length(description) <= 500)
+  );
+  CREATE INDEX idx_routine_items_routine ON routine_items(routine_id);
+  CREATE INDEX idx_routine_items_project ON routine_items(project_id);
+
+  CREATE TABLE routine_runs (
+    routine_id  INTEGER NOT NULL REFERENCES routines(id) ON DELETE CASCADE,
+    date        TEXT    NOT NULL,
+    created_at  TEXT    NOT NULL,
+    PRIMARY KEY (routine_id, date)
+  );
+  `,
 ];
 
 export const REQUIRED_TABLES = ['users', 'projects', 'time_entries', 'settings'];

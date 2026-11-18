@@ -4,11 +4,12 @@
  */
 import { ClipboardList, Copy, MonitorDown, Palmtree, Pencil, Repeat2, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { PROJECT_KINDS, formatDateLong, isAbsenceKind, formatHours, todayIso, workTypeLabel } from '../../shared/rules';
+import { PROJECT_KINDS, dayLimitFor, formatDateLong, isAbsenceKind, formatHours, todayIso, workTypeLabel } from '../../shared/rules';
 import type { DayData, Project, TimeEntry } from '../../shared/types';
 import { AbsenceModal } from '../components/AbsenceModal';
 import { DaySummaryCard } from '../components/DaySummaryCard';
 import { EntryForm, type EntryFormValues } from '../components/EntryForm';
+import { RoutinesCard } from '../components/RoutinesCard';
 import { useToast } from '../components/Toast';
 import { Badge, Button, Card, ConfirmDialog, EmptyState, IconButton, PageHeader, cx, workTypeTone } from '../components/ui';
 import { api, errorMessage } from '../lib/api';
@@ -93,7 +94,7 @@ export function ImputarPage({
 
   useEffect(() => {
     void loadDay();
-  }, [loadDay, dataVersion, settings.maxDailyMinutes, settings.workDays.join(',')]);
+  }, [loadDay, dataVersion, JSON.stringify(settings.schedules), settings.activeScheduleId]);
 
   useEffect(() => {
     api.projects
@@ -268,7 +269,7 @@ export function ImputarPage({
             onChange={onChange}
             users={users}
             projects={selectableProjects}
-            maxMinutes={day?.summary.maxMinutes ?? settings.maxDailyMinutes}
+            maxMinutes={day?.summary.maxMinutes ?? dayLimitFor(values.date, settings)}
             usedMinutes={usedMinutes}
             editing={!!editingEntry}
             onAddUser={onAddUser}
@@ -292,6 +293,15 @@ export function ImputarPage({
 
         <div className="col-span-5 space-y-6">
           <DaySummaryCard summary={day?.summary ?? null} />
+
+          <RoutinesCard
+            userId={values.userId}
+            date={values.date}
+            projects={projects}
+            dayEntries={day?.entries ?? []}
+            dataVersion={dataVersion}
+            pendingMinutes={day?.summary.pendingMinutes ?? 0}
+          />
 
           <Card>
             <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3.5">

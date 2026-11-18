@@ -79,7 +79,7 @@ export function IconButton({
 
 export function Card({ className, children }: { className?: string; children: ReactNode }) {
   return (
-    <div className={cx('rounded-xl border border-slate-200/80 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)]', className)}>
+    <div className={cx('glass rounded-xl border border-slate-200/80 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)]', className)}>
       {children}
     </div>
   );
